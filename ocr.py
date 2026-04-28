@@ -38,6 +38,16 @@ def ocr_page(img: Image.Image, lang: str, psm: int, preprocess_image: bool) -> s
     return pytesseract.image_to_string(img, lang=lang, config=f"--psm {psm}")
 
 
+def ocr_page_pdf(
+    img: Image.Image, lang: str, psm: int, preprocess_image: bool
+) -> bytes:
+    if preprocess_image:
+        img = preprocess_pil(img)
+    return pytesseract.image_to_pdf_or_hocr(
+        img, lang=lang, config=f"--psm {psm}", extension="pdf"
+    )
+
+
 def run_ocr(
     path: Path, lang: str, psm: int, preprocess_image: bool, dpi: int
 ) -> str:
@@ -52,11 +62,37 @@ def run_ocr(
     return "\n".join(chunks)
 
 
+def run_ocr_pdf(
+    path: Path, lang: str, psm: int, preprocess_image: bool, dpi: int
+) -> bytes:
+    """Produce a searchable PDF (image + invisible text layer)."""
+    import io
+
+    from pypdf import PdfReader, PdfWriter
+
+    pages = load_pages(path, dpi)
+    writer = PdfWriter()
+    for page in pages:
+        page_bytes = ocr_page_pdf(page, lang, psm, preprocess_image)
+        reader = PdfReader(io.BytesIO(page_bytes))
+        for p in reader.pages:
+            writer.add_page(p)
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="path to input image or PDF")
     parser.add_argument(
         "-o", "--output", type=Path, help="output .txt path (defaults to stdout)"
+    )
+    parser.add_argument(
+        "--pdf-output",
+        type=Path,
+        help="write a searchable PDF here instead of plain text",
     )
     parser.add_argument("-l", "--lang", default="eng", help="Tesseract language code")
     parser.add_argument(
@@ -81,6 +117,16 @@ def main() -> int:
     if not args.input.exists():
         print(f"error: {args.input} not found", file=sys.stderr)
         return 1
+
+    if args.pdf_output:
+        pdf_bytes = run_ocr_pdf(
+            args.input, args.lang, args.psm, not args.no_preprocess, args.dpi
+        )
+        args.pdf_output.write_bytes(pdf_bytes)
+        print(
+            f"wrote {len(pdf_bytes)} bytes to {args.pdf_output}", file=sys.stderr
+        )
+        return 0
 
     text = run_ocr(
         args.input, args.lang, args.psm, not args.no_preprocess, args.dpi

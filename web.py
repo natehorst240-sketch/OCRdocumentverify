@@ -8,9 +8,9 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
-from ocr import run_ocr
+from ocr import run_ocr, run_ocr_pdf
 
 app = FastAPI(title="OCR Tool")
 
@@ -49,6 +49,11 @@ INDEX_HTML = """\
       </div>
     </div>
     <label><input type="checkbox" name="preprocess" value="1" checked /> Preprocess (denoise + threshold)</label>
+    <label for="format">Output format</label>
+    <select id="format" name="format">
+      <option value="text">Plain text</option>
+      <option value="pdf">Searchable PDF</option>
+    </select>
     <button type="submit">Run OCR</button>
   </form>
 </body>
@@ -61,26 +66,45 @@ def index() -> str:
     return INDEX_HTML
 
 
-@app.post("/ocr", response_class=PlainTextResponse)
+@app.post("/ocr")
 async def ocr_endpoint(
     file: UploadFile = File(...),
     lang: str = Form("eng"),
     psm: int = Form(3),
     dpi: int = Form(300),
     preprocess: str = Form(""),
-) -> str:
+    format: str = Form("text"),
+) -> Response:
     suffix = Path(file.filename or "").suffix or ".bin"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = Path(tmp.name)
 
     try:
-        return run_ocr(
+        if format == "pdf":
+            pdf_bytes = run_ocr_pdf(
+                tmp_path,
+                lang=lang,
+                psm=psm,
+                preprocess_image=bool(preprocess),
+                dpi=dpi,
+            )
+            stem = Path(file.filename or "output").stem
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{stem}.ocr.pdf"'
+                },
+            )
+
+        text = run_ocr(
             tmp_path,
             lang=lang,
             psm=psm,
             preprocess_image=bool(preprocess),
             dpi=dpi,
         )
+        return PlainTextResponse(text)
     finally:
         tmp_path.unlink(missing_ok=True)
