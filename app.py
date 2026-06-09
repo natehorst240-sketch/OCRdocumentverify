@@ -10,9 +10,13 @@ from pathlib import Path
 import streamlit as st
 
 import database
+import field_mapper
+import form_detector
 import ocr
 import pdf_parser
+import pdf_writer
 import qwen_client
+import templates
 import veryon_import
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -208,11 +212,101 @@ def page_upload_veryon() -> None:
     st.json(summary["column_map"])
 
 
+def _first_page_image(saved: Path) -> Path:
+    """Return an image path for a saved upload (rasterize PDF first page)."""
+    if saved.suffix.lower() == ".pdf":
+        return ocr.pdf_to_images(saved, UPLOADS_DIR / "forms")[0]
+    return saved
+
+
+def page_reconstruct() -> None:
+    st.title("🧩 Reconstruct Form")
+    st.caption("Detect the form type, OCR each field box, map to a template, "
+               "and export a filled PDF.")
+
+    uploaded = st.file_uploader(
+        "Upload one scanned form", type=["jpg", "jpeg", "png", "pdf"])
+    if uploaded and st.button("Analyze form"):
+        saved = save_upload(uploaded, subdir="forms")
+        with st.spinner("Reading and analyzing the form…"):
+            image_path = _first_page_image(saved)
+            full_text = ocr.ocr_page(image_path)
+            classification = form_detector.classify_form_type(full_text)
+            boxes = form_detector.detect_boxes(image_path)
+            boxes = form_detector.ocr_boxes(image_path, boxes)
+            annotated = form_detector.annotate_image(
+                image_path, boxes,
+                OUTPUT_DIR / f"annotated_{Path(image_path).stem}.png")
+        st.session_state["recon"] = {
+            "image_path": str(image_path),
+            "annotated": str(annotated),
+            "classification": classification,
+            "boxes": boxes,
+        }
+        st.session_state.pop("recon_mappings", None)
+
+    recon = st.session_state.get("recon")
+    if not recon:
+        return
+
+    # --- US 3.1: detected type + manual override -----------------------------
+    cls = recon["classification"]
+    st.subheader("Detected form type")
+    st.write(f"**{cls['form_type']}**  ·  confidence {cls['confidence']:.0%}")
+
+    known = [t["form_type"] for t in templates.list_templates()]
+    options = known + (["Unknown"] if "Unknown" not in known else [])
+    default = cls["form_type"] if cls["form_type"] in options else \
+        (options[0] if options else "Unknown")
+    chosen = st.selectbox(
+        "Confirm or override form type", options or ["Unknown"],
+        index=(options.index(default) if default in options else 0))
+
+    # --- US 3.2: annotated boxes --------------------------------------------
+    st.subheader(f"Detected boxes ({len(recon['boxes'])})")
+    st.image(recon["annotated"], use_container_width=True)
+
+    template = templates.load_template(chosen) if chosen != "Unknown" else None
+    if template is None:
+        st.warning(
+            f"No template for '{chosen}'. Build one in the Template Builder "
+            "(Sprint 5) to enable field mapping and PDF output.")
+        return
+
+    # --- US 3.3: map boxes -> fields, editable -------------------------------
+    if st.button("Map boxes to fields"):
+        with st.spinner("Mapping fields with Qwen…"):
+            st.session_state["recon_mappings"] = \
+                field_mapper.map_boxes_to_fields(recon["boxes"], template)
+
+    mappings = st.session_state.get("recon_mappings")
+    if mappings:
+        st.subheader("Field mapping (edit before export)")
+        edited = st.data_editor(
+            mappings, use_container_width=True, num_rows="fixed",
+            key="mapping_editor")
+        # st.data_editor returns the same container type it was given.
+        edited = list(edited) if not isinstance(edited, list) else edited
+
+        # --- US 3.4: generate filled PDF ------------------------------------
+        if st.button("Generate filled PDF"):
+            field_mapper.save_corrections(chosen, edited)
+            values = field_mapper.mappings_to_values(edited)
+            out_pdf = OUTPUT_DIR / f"{templates.slugify(chosen)}_filled.pdf"
+            with st.spinner("Building PDF…"):
+                pdf_writer.fill_pdf(template, values, out_pdf, base_dir=BASE_DIR)
+            st.success("Filled PDF generated.")
+            st.download_button(
+                "⬇️ Download filled PDF", data=out_pdf.read_bytes(),
+                file_name=out_pdf.name, mime="application/pdf")
+
+
 PAGES = {
     "Dashboard": page_dashboard,
     "Upload Records": page_upload_records,
     "Upload Requirements": page_upload_requirements,
     "Upload Veryon Export": page_upload_veryon,
+    "Reconstruct Form": page_reconstruct,
 }
 
 
@@ -225,7 +319,7 @@ def main() -> None:
 
     choice = st.sidebar.radio("Navigate", list(PAGES.keys()))
     st.sidebar.markdown("---")
-    st.sidebar.caption("Sprint 2: ingestion + OCR")
+    st.sidebar.caption("Sprint 3: form reconstruction")
 
     if choice == "Dashboard":
         page_dashboard(db_path)

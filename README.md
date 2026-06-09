@@ -21,8 +21,18 @@ your machine — no internet or hosting required.
 - Upload Veryon Excel export; loose column mapping into `veryon_tasks`
   (`veryon_import.py`).
 
-Later sprints add form reconstruction (Sprint 3), gap analysis (Sprint 4),
-and a template builder (Sprint 5).
+**Sprint 3 — Form Detection & Reconstruction** ✅
+
+- Classify the scanned form type with a confidence score + manual override
+  (`form_detector.classify_form_type`).
+- Detect field boxes with OpenCV and OCR each box individually; show an
+  annotated image (`form_detector.detect_boxes` / `ocr_boxes`).
+- Map boxes to template fields via Qwen, editable before export, with learned
+  corrections saved per form type (`field_mapper.py`, `templates.py`).
+- Generate a filled PDF by overlaying text at template coordinates
+  (`pdf_writer.fill_pdf`, reportlab + pypdf).
+
+Later sprints add gap analysis (Sprint 4) and a template builder (Sprint 5).
 
 ### Architecture note: how much actually needs the LLM?
 
