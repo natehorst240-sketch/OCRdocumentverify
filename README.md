@@ -9,14 +9,29 @@ your machine — no internet or hosting required.
 
 **Sprint 1 — Project Setup** ✅
 
-- Project folder structure
-- `requirements.txt` with all dependencies
-- SQLite database with full schema (`database.py`)
-- Local Qwen2.5 client via Ollama (`qwen_client.py`)
-- Streamlit app that boots, initializes the DB, and reports system status
+- Project folder structure, `requirements.txt`, SQLite schema (`database.py`),
+  Qwen2.5 client via Ollama (`qwen_client.py`), Streamlit app with status page.
 
-Later sprints add ingestion + OCR (Sprint 2), form reconstruction (Sprint 3),
-gap analysis (Sprint 4), and a template builder (Sprint 5).
+**Sprint 2 — Document Ingestion** ✅
+
+- Upload scanned records (JPG/PNG/PDF); PDFs split to per-page images (`ocr.py`).
+- Preprocess (grayscale, denoise, deskew) + PaddleOCR per page, stored in SQLite.
+- Upload AD/ASB/ICA PDFs; pdfplumber text + Qwen structuring, with dedup
+  (`pdf_parser.py`).
+- Upload Veryon Excel export; loose column mapping into `veryon_tasks`
+  (`veryon_import.py`).
+
+Later sprints add form reconstruction (Sprint 3), gap analysis (Sprint 4),
+and a template builder (Sprint 5).
+
+### Architecture note: how much actually needs the LLM?
+
+Most of the pipeline is a deterministic Python engine — OCR (PaddleOCR), PDF
+and Excel parsing, OpenCV box detection, and PDF filling need no LLM. Qwen is
+used only for the fuzzy-language parts: structuring free-form regulatory text,
+classifying/mapping unfamiliar forms, and confirming semantic compliance
+matches. Those LLM calls are isolated in `qwen_client.py` and the modules that
+call it, so they can be stubbed or swapped for rules/embeddings if desired.
 
 ## Prerequisites
 

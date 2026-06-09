@@ -110,6 +110,94 @@ def table_counts(db_path: Path = DB_PATH) -> dict:
     return counts
 
 
+# --- Insert / update helpers ------------------------------------------------
+
+def add_document(filename: str, stored_path: str, file_type: str | None,
+                 category: str, page_count: int = 1,
+                 db_path: Path = DB_PATH) -> int:
+    """Record an uploaded document and return its id."""
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO documents (filename, stored_path, file_type, "
+            "category, page_count) VALUES (?, ?, ?, ?, ?)",
+            (filename, stored_path, file_type, category, page_count),
+        )
+        return cur.lastrowid
+
+
+def add_page(document_id: int, page_number: int, source_file: str,
+             extracted_text: str | None = None, form_type: str | None = None,
+             db_path: Path = DB_PATH) -> int:
+    """Record one page of a document and return its id."""
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO pages (document_id, page_number, source_file, "
+            "extracted_text, form_type) VALUES (?, ?, ?, ?, ?)",
+            (document_id, page_number, source_file, extracted_text, form_type),
+        )
+        return cur.lastrowid
+
+
+def update_page_text(page_id: int, extracted_text: str,
+                     db_path: Path = DB_PATH) -> None:
+    """Attach OCR text to an existing page row."""
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "UPDATE pages SET extracted_text = ? WHERE id = ?",
+            (extracted_text, page_id),
+        )
+
+
+def add_requirement(doc_number: str | None, req_type: str | None,
+                    description: str | None, interval: str | None = None,
+                    applicability: str | None = None,
+                    required_action: str | None = None,
+                    source_file: str | None = None,
+                    db_path: Path = DB_PATH) -> int | None:
+    """Insert a requirement, skipping duplicates.
+
+    Returns the new row id, or ``None`` if it was a duplicate (the UNIQUE
+    constraint on doc_number/type/description satisfies US 2.3 dedup).
+    """
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO requirements (doc_number, req_type, "
+            "description, interval, applicability, required_action, "
+            "source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (doc_number, req_type, description, interval, applicability,
+             required_action, source_file),
+        )
+        return cur.lastrowid if cur.rowcount else None
+
+
+def add_veryon_task(task_code: str | None, description: str | None,
+                    interval: str | None = None,
+                    last_compliance_date: str | None = None,
+                    last_compliance_hours: str | None = None,
+                    source_file: str | None = None,
+                    db_path: Path = DB_PATH) -> int:
+    """Insert one Veryon task row and return its id."""
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO veryon_tasks (task_code, description, interval, "
+            "last_compliance_date, last_compliance_hours, source_file) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (task_code, description, interval, last_compliance_date,
+             last_compliance_hours, source_file),
+        )
+        return cur.lastrowid
+
+
+# --- Read helpers -----------------------------------------------------------
+
+def fetch_all(table: str, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
+    """Return all rows from a table, newest first where an id exists."""
+    with get_connection(db_path) as conn:
+        return conn.execute(
+            f"SELECT * FROM {table} ORDER BY id DESC"
+        ).fetchall()
+
+
 if __name__ == "__main__":
     path = init_db()
     print(f"Initialized database at {path}")
