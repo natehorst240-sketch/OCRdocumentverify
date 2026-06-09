@@ -92,6 +92,47 @@ python database.py     # creates records.db, prints table counts
 python qwen_client.py  # checks Ollama and sends a test prompt
 ```
 
+## Self-hosting on a home server (Docker)
+
+Run the whole package — Streamlit app **and** the local Ollama LLM — with one
+command. All persistent state lives under `./data`, so backups are a copy of
+that one folder.
+
+```bash
+cp .env.example .env          # pick your model (qwen2.5:7b GPU / qwen2.5:3b CPU)
+docker compose up -d          # builds the app, pulls the model, starts everything
+```
+
+Then open `http://<server-ip>:8501`. The compose stack:
+
+- **auto-pulls the model** on first start (the `ollama-pull` one-shot),
+- **restarts on crash/reboot** (`restart: unless-stopped`),
+- has **healthchecks** on both the app and Ollama so the app only starts once
+  the LLM is ready,
+- keeps the DB, uploads, output, and templates under `./data` for easy backup.
+
+### Recommended hardware
+
+- **Reliable for a small team:** 6–8 core CPU, **32 GB RAM**, an **NVIDIA
+  12 GB GPU** (e.g. RTX 3060 12GB), 500 GB NVMe — runs `qwen2.5:7b` snappily.
+  Enable the GPU by uncommenting the `deploy:` block under the `ollama` service
+  (requires the NVIDIA Container Toolkit on the host).
+- **Budget / CPU-only:** 16 GB RAM minimum; set `QWEN_MODEL=qwen2.5:3b` in
+  `.env` for tolerable speed.
+
+### Reliability extras
+
+- **UPS + graceful shutdown** — protects SQLite from corruption on power loss.
+- **Backups** — `scripts/backup.sh` takes a consistent SQLite snapshot and
+  archives `./data` with retention. Schedule it via cron:
+
+  ```
+  0 2 * * *  cd /srv/ocrdocumentverify && scripts/backup.sh >> backup.log 2>&1
+  ```
+
+- **Auth** — Streamlit has no built-in login; keep it on a trusted LAN or front
+  it with a reverse proxy / Cloudflare Tunnel for HTTPS + access control.
+
 ## Configuration
 
 Environment variables (all optional):
@@ -101,6 +142,7 @@ Environment variables (all optional):
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API base URL         |
 | `QWEN_MODEL`  | `qwen2.5:7b`             | Model name to use           |
 | `QWEN_TIMEOUT`| `120`                    | Per-request timeout seconds |
+| `RECORDS_DB`  | `./records.db`           | SQLite path (set to a mounted volume when hosting) |
 
 ## Project layout
 

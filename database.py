@@ -5,11 +5,14 @@ called on every app start, so the schema here is the single source of truth
 for all sprints, not just Sprint 1.
 """
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "records.db"
+# Honor RECORDS_DB so all state can live on one mounted volume (see compose).
+DB_PATH = Path(os.environ.get("RECORDS_DB")
+               or Path(__file__).resolve().parent / "records.db")
 
 # --- Schema -----------------------------------------------------------------
 # Each table maps to a user story in the plan:
