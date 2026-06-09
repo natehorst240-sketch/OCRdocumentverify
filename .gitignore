@@ -9,10 +9,17 @@ env/
 # App data
 records.db
 records.db-journal
+*.db
+*.db-journal
 uploads/*
 output/*
 !uploads/.gitkeep
 !output/.gitkeep
+
+# Real records / runtime state (Docker bind-mounts and backups) — NEVER commit
+.env
+data/
+backups/
 
 # OS / editor
 .DS_Store
