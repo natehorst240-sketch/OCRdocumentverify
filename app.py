@@ -39,7 +39,9 @@ def save_upload(uploaded_file, subdir: str = "") -> Path:
     """Persist a Streamlit UploadedFile under /uploads and return its path."""
     target_dir = UPLOADS_DIR / subdir if subdir else UPLOADS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / uploaded_file.name
+    # Use only the basename so a crafted filename can't escape the uploads dir.
+    safe_name = Path(uploaded_file.name).name
+    target = target_dir / safe_name
     target.write_bytes(uploaded_file.getbuffer())
     return target
 
@@ -74,7 +76,7 @@ def page_dashboard(db_path: Path) -> None:
         "compliance": "Compliance Records",
     }
     cols = st.columns(len(counts))
-    for col, (table, count) in zip(cols, counts.items()):
+    for col, (table, count) in zip(cols, counts.items(), strict=True):
         col.metric(labels.get(table, table), count)
 
 
@@ -314,8 +316,10 @@ def page_reconstruct() -> None:
 
     known = [t["form_type"] for t in templates.list_templates()]
     options = known + (["Unknown"] if "Unknown" not in known else [])
-    default = cls["form_type"] if cls["form_type"] in options else \
-        (options[0] if options else "Unknown")
+    # Only pre-select a template when the classifier matched an exact saved
+    # name; otherwise default to Unknown so an unrelated template is never
+    # applied (and exported) silently for a new/renamed form.
+    default = cls["form_type"] if cls["form_type"] in options else "Unknown"
     chosen = st.selectbox(
         "Confirm or override form type", options or ["Unknown"],
         index=(options.index(default) if default in options else 0))
@@ -546,9 +550,12 @@ def page_template_builder() -> None:
                 st.success(f"Saved {path.name} "
                            f"({len(template['fields'])} field(s)).")
     with col_delete:
-        if not is_new and st.button("Delete"):
-            templates.delete_template(choice)
-            st.warning(f"Deleted '{choice}'. Reselect a template.")
+        if not is_new:
+            confirm = st.checkbox("Confirm", key=f"del_{state_key}")
+            if st.button("Delete", disabled=not confirm):
+                templates.delete_template(choice)
+                st.warning(f"Deleted '{choice}'. Reselect a template.")
+                st.rerun()
 
 
 PAGES = {

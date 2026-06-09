@@ -56,6 +56,9 @@ def import_excel(xlsx_path: str | Path, db_path: Path = database.DB_PATH) -> dic
         val = row.get(col)
         if pd.isna(val):
             return None
+        # Render dates as date-only strings, not "2024-01-15 00:00:00".
+        if isinstance(val, pd.Timestamp):
+            return val.strftime("%Y-%m-%d")
         return str(val).strip()
 
     imported = 0

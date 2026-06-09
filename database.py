@@ -79,7 +79,25 @@ CREATE TABLE IF NOT EXISTS compliance (
     FOREIGN KEY (requirement_id) REFERENCES requirements(id) ON DELETE CASCADE,
     FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL
 );
+
+-- SQLite treats NULLs as distinct in a UNIQUE constraint, so the inline
+-- UNIQUE on requirements does not dedup rows with a NULL doc_number/req_type.
+-- This expression index normalizes NULLs so dedup works for manual entries too.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_dedup ON requirements (
+    COALESCE(doc_number, ''), COALESCE(req_type, ''), COALESCE(description, '')
+);
 """
+
+# Tables the app is allowed to address by name. Keeps the dynamic-table helpers
+# below safe from SQL injection even though all current callers pass literals.
+VALID_TABLES = frozenset({
+    "documents", "pages", "requirements", "veryon_tasks", "compliance"})
+
+
+def _check_table(table: str) -> str:
+    if table not in VALID_TABLES:
+        raise ValueError(f"Unknown table: {table!r}")
+    return table
 
 
 @contextmanager
@@ -104,10 +122,9 @@ def init_db(db_path: Path = DB_PATH) -> Path:
 
 def table_counts(db_path: Path = DB_PATH) -> dict:
     """Return row counts per table, for the dashboard / status display."""
-    tables = ["documents", "pages", "requirements", "veryon_tasks", "compliance"]
     counts = {}
     with get_connection(db_path) as conn:
-        for table in tables:
+        for table in sorted(VALID_TABLES):
             row = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
             counts[table] = row["n"]
     return counts
@@ -213,12 +230,14 @@ def add_compliance(requirement_id: int, page_id: int | None, status: str,
 
 def clear_table(table: str, db_path: Path = DB_PATH) -> None:
     """Delete all rows from a table (used to re-run matching cleanly)."""
+    table = _check_table(table)
     with get_connection(db_path) as conn:
         conn.execute(f"DELETE FROM {table}")
 
 
 def fetch_all(table: str, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
     """Return all rows from a table, newest first where an id exists."""
+    table = _check_table(table)
     with get_connection(db_path) as conn:
         return conn.execute(
             f"SELECT * FROM {table} ORDER BY id DESC"

@@ -40,6 +40,7 @@ def build_gap_report(tail_number: str, out_dir: str | Path,
     """Write the gap-report workbook and return its path."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
 
     rows = database.compliance_report(db_path)
 
@@ -69,8 +70,8 @@ def build_gap_report(tail_number: str, out_dir: str | Path,
 
         # Reasonable column widths.
         for col_idx, (_, label) in enumerate(COLUMNS, start=1):
-            ws.column_dimensions[ws.cell(row=1, column=col_idx)
-                                 .column_letter].width = max(14, len(label) + 2)
+            ws.column_dimensions[get_column_letter(col_idx)].width = \
+                max(14, len(label) + 2)
         ws.freeze_panes = "A2"
 
     out_dir = Path(out_dir)

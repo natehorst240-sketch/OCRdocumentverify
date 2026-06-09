@@ -56,11 +56,14 @@ def list_templates() -> list[dict]:
 
 
 def load_template(form_type: str) -> dict | None:
-    """Load a template by form-type name, or None if not found."""
+    """Load a template by form-type name, or None if missing/corrupt."""
     path = template_path(form_type)
     if not path.exists():
         return None
-    return json.loads(path.read_text())
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None  # match list_templates: skip rather than raise
 
 
 def save_template(template: dict) -> Path:

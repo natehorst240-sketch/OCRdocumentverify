@@ -85,8 +85,11 @@ def confirm_match(requirement: dict, page_text: str) -> dict:
         conf = max(0.0, min(1.0, float(result.get("confidence", 0.0))))
     except (TypeError, ValueError):
         conf = 0.0
+    # Preserve None when the model omits "complied" so run_matching can fall
+    # back to keyword scoring rather than treating it as a definite "no".
+    complied = result.get("complied")
     return {
-        "complied": bool(result.get("complied")),
+        "complied": None if complied is None else bool(complied),
         "confidence": conf,
         "compliance_date": result.get("compliance_date"),
         "compliance_hours": result.get("compliance_hours"),
@@ -122,7 +125,7 @@ def run_matching(db_path=database.DB_PATH, use_llm: bool | None = None) -> dict:
             req["doc_number"], req["description"], req["required_action"]]))
         candidates = prefilter(req_text, pages)
 
-        best = None  # (status_rank, result_dict, page_row)
+        best = None  # (page_row, result_dict)
         for score, page in candidates:
             if use_llm:
                 result = confirm_match(dict(req), page["extracted_text"])
