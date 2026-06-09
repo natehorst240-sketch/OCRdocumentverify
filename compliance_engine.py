@@ -102,12 +102,15 @@ def _classify(complied, confidence: float) -> str:
     return "outstanding"
 
 
-def run_matching(db_path=database.DB_PATH, use_llm: bool = True) -> dict:
+def run_matching(db_path=database.DB_PATH, use_llm: bool | None = None) -> dict:
     """Match every requirement against record pages and store results.
 
     Clears prior results, then writes exactly one compliance row per
-    requirement. Returns a count summary by status.
+    requirement. Returns a count summary by status. ``use_llm`` defaults to the
+    deployment's LLM setting (off → keyword-only, conservative).
     """
+    if use_llm is None:
+        use_llm = qwen_client.llm_enabled()
     requirements = database.fetch_all("requirements", db_path)
     pages = [p for p in database.fetch_all("pages", db_path)
              if (p["extracted_text"] or "").strip()]

@@ -24,6 +24,8 @@ def classify_form_type(text: str, known_types: list[str] | None = None) -> dict:
     the form types we already have templates for; the model is told to prefer
     them but may answer "Unknown" so the UI can flag it for manual mapping.
     """
+    if not qwen_client.llm_enabled():
+        return {"form_type": "Unknown", "confidence": 0.0}  # user picks manually
     known_types = known_types or [t["form_type"] for t in templates.list_templates()]
     options = ", ".join(known_types) if known_types else "(none defined yet)"
     prompt = (

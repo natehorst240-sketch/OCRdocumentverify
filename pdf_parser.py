@@ -55,8 +55,8 @@ def extract_requirements(text: str, max_chars: int = 12000) -> list[dict]:
     context; callers can chunk upstream if a document is very large.
     """
     text = (text or "").strip()
-    if not text:
-        return []
+    if not text or not qwen_client.llm_enabled():
+        return []  # no-LLM mode: requirements are entered manually
 
     result = qwen_client.generate_json(
         _PROMPT.format(text=text[:max_chars]), system=_SYSTEM

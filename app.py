@@ -59,9 +59,12 @@ def page_dashboard(db_path: Path) -> None:
             else "Database not initialized."
         )
     with col_qwen:
-        st.markdown("**Qwen / Ollama**")
-        ok, message = qwen_client.is_available()
-        (st.success if ok else st.error)(message)
+        st.markdown("**LLM**")
+        if not qwen_client.llm_enabled():
+            st.info("No-LLM mode — manual entry, keyword matching.")
+        else:
+            ok, message = qwen_client.is_available()
+            (st.success if ok else st.error)(message)
 
     st.subheader("Loaded data")
     counts = database.table_counts()
@@ -140,7 +143,60 @@ def page_upload_records() -> None:
     st.success("Records processed and stored.")
 
 
+def _current_requirements_table() -> None:
+    reqs = [dict(r) for r in database.fetch_all("requirements")]
+    st.subheader(f"Current requirements ({len(reqs)})")
+    if reqs:
+        st.dataframe(
+            [{k: r.get(k) for k in
+              ("doc_number", "req_type", "description", "interval",
+               "applicability")} for r in reqs],
+            use_container_width=True)
+
+
+def _manual_requirements() -> None:
+    """No-LLM requirement entry: read a PDF for reference, type rows in."""
+    st.title("📋 Requirements (AD / ASB / ICA) — manual entry")
+    st.caption("No-LLM mode: upload a PDF to read it, then add requirements by "
+               "hand. Duplicates are skipped automatically.")
+
+    pdf = st.file_uploader("Reference PDF (optional)", type=["pdf"])
+    if pdf:
+        saved = save_upload(pdf, subdir="requirements")
+        with st.spinner("Extracting text…"):
+            text = pdf_parser.extract_text(saved)
+        st.text_area("Extracted text (read-only reference)",
+                     text or "(no extractable text)", height=220)
+
+    with st.form("add_requirement", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        doc_number = c1.text_input("Doc number", placeholder="AD 2021-12-05")
+        req_type = c2.selectbox("Type", ["AD", "ASB", "ICA", "Other"])
+        interval = c3.text_input("Interval", placeholder="100 hrs / one-time")
+        description = st.text_input("Description (required)")
+        applicability = st.text_input("Applicability")
+        action = st.text_input("Required action")
+        if st.form_submit_button("Add requirement", type="primary"):
+            if not description.strip():
+                st.error("Description is required.")
+            else:
+                new_id = database.add_requirement(
+                    doc_number.strip() or None, req_type, description.strip(),
+                    interval=interval.strip() or None,
+                    applicability=applicability.strip() or None,
+                    required_action=action.strip() or None,
+                    source_file=(pdf.name if pdf else "manual"))
+                st.success("Requirement added." if new_id
+                           else "Duplicate — skipped.")
+
+    _current_requirements_table()
+
+
 def page_upload_requirements() -> None:
+    if not qwen_client.llm_enabled():
+        _manual_requirements()
+        return
+
     st.title("📋 Upload Requirements (AD / ASB / ICA)")
     st.caption("Regulatory PDFs are parsed into structured requirements.")
 
@@ -515,7 +571,8 @@ def main() -> None:
 
     choice = st.sidebar.radio("Navigate", list(PAGES.keys()))
     st.sidebar.markdown("---")
-    st.sidebar.caption("Sprint 5: template builder")
+    st.sidebar.caption(
+        f"Mode: {'No-LLM (manual)' if not qwen_client.llm_enabled() else 'LLM'}")
 
     if choice == "Dashboard":
         page_dashboard(db_path)

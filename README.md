@@ -123,6 +123,22 @@ Then open `http://<server-ip>:8501`. The compose stack:
   the LLM is ready,
 - keeps the DB, uploads, output, and templates under `./data` for easy backup.
 
+### No-LLM mode (low-RAM hosts, e.g. an 8 GB N100)
+
+Set `DISABLE_LLM=1` to run the deterministic pipeline without Ollama: form
+classification and field mapping become manual, requirements are entered by
+hand, and compliance matching uses keyword scoring (conservative — it flags for
+review rather than auto-confirming). Fits comfortably in 8 GB.
+
+```bash
+docker compose -f docker-compose.nollm.yml up -d   # app only, no Ollama
+```
+
+A common split: **no-LLM app on the N100**, full **LLM stack on a desktop**.
+Same codebase, same data layout — only the `DISABLE_LLM` flag differs. (If you
+want LLM smarts from the N100 without hosting the model there, leave LLM mode on
+and point `OLLAMA_HOST` at the desktop instead.)
+
 ### Recommended hardware
 
 - **Reliable for a small team:** 6–8 core CPU, **32 GB RAM**, an **NVIDIA

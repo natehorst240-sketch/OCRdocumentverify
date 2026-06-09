@@ -70,7 +70,16 @@ def map_boxes_to_fields(boxes: list[dict], template: dict) -> list[dict]:
             unresolved.append(box)
 
     if unresolved and fields:
-        resolved.extend(_map_with_qwen(unresolved, fields))
+        if qwen_client.llm_enabled():
+            resolved.extend(_map_with_qwen(unresolved, fields))
+        else:
+            # No-LLM mode: surface unmapped boxes blank for manual assignment.
+            for box in unresolved:
+                resolved.append({
+                    "box_id": box.get("id"),
+                    "text": (box.get("text") or "").strip(),
+                    "field_name": None, "confidence": 0.0,
+                })
     return sorted(resolved, key=lambda r: (r["box_id"] or 0))
 
 

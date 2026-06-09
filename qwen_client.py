@@ -18,11 +18,23 @@ class QwenError(RuntimeError):
     """Raised when the Ollama backend is unreachable or returns an error."""
 
 
+def llm_enabled() -> bool:
+    """False when the deployment is configured for no-LLM mode.
+
+    Set ``DISABLE_LLM=1`` (the N100 / low-RAM host) to run the deterministic
+    pipeline with manual entry instead of Qwen.
+    """
+    return os.environ.get("DISABLE_LLM", "").strip().lower() not in {
+        "1", "true", "yes", "on"}
+
+
 def is_available(timeout: int = 5) -> tuple[bool, str]:
     """Check that Ollama is up and the Qwen model is installed.
 
     Returns ``(ok, message)`` so the UI can show a friendly status line.
     """
+    if not llm_enabled():
+        return False, "LLM disabled (no-LLM mode) — manual entry in use."
     try:
         resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=timeout)
         resp.raise_for_status()
@@ -41,6 +53,8 @@ def is_available(timeout: int = 5) -> tuple[bool, str]:
 def generate(prompt: str, system: str | None = None,
              temperature: float = 0.0, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Send a single prompt to Qwen and return the text response."""
+    if not llm_enabled():
+        raise QwenError("LLM disabled (no-LLM mode)")
     payload = {
         "model": MODEL,
         "prompt": prompt,
