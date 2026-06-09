@@ -188,13 +188,52 @@ def add_veryon_task(task_code: str | None, description: str | None,
         return cur.lastrowid
 
 
+def add_compliance(requirement_id: int, page_id: int | None, status: str,
+                   confidence: float | None = None,
+                   compliance_date: str | None = None,
+                   compliance_hours: str | None = None,
+                   notes: str | None = None,
+                   db_path: Path = DB_PATH) -> int:
+    """Record one compliance result for a requirement (US 4.1)."""
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO compliance (requirement_id, page_id, status, "
+            "confidence, compliance_date, compliance_hours, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (requirement_id, page_id, status, confidence, compliance_date,
+             compliance_hours, notes),
+        )
+        return cur.lastrowid
+
+
 # --- Read helpers -----------------------------------------------------------
+
+def clear_table(table: str, db_path: Path = DB_PATH) -> None:
+    """Delete all rows from a table (used to re-run matching cleanly)."""
+    with get_connection(db_path) as conn:
+        conn.execute(f"DELETE FROM {table}")
+
 
 def fetch_all(table: str, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
     """Return all rows from a table, newest first where an id exists."""
     with get_connection(db_path) as conn:
         return conn.execute(
             f"SELECT * FROM {table} ORDER BY id DESC"
+        ).fetchall()
+
+
+def compliance_report(db_path: Path = DB_PATH) -> list[sqlite3.Row]:
+    """Join requirements to their compliance result and source page (US 4.3)."""
+    with get_connection(db_path) as conn:
+        return conn.execute(
+            "SELECT r.id AS requirement_id, r.doc_number, r.req_type, "
+            "r.description, r.interval, r.source_file AS requirement_source, "
+            "c.status, c.confidence, c.compliance_date, c.compliance_hours, "
+            "c.notes, p.source_file AS record_source, p.page_number "
+            "FROM requirements r "
+            "LEFT JOIN compliance c ON c.requirement_id = r.id "
+            "LEFT JOIN pages p ON c.page_id = p.id "
+            "ORDER BY r.id"
         ).fetchall()
 
 

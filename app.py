@@ -9,7 +9,9 @@ from pathlib import Path
 
 import streamlit as st
 
+import compliance_engine
 import database
+import excel_export
 import field_mapper
 import form_detector
 import ocr
@@ -301,12 +303,66 @@ def page_reconstruct() -> None:
                 file_name=out_pdf.name, mime="application/pdf")
 
 
+def page_gap_analysis() -> None:
+    st.title("📑 Compliance Gap Analysis")
+    st.caption("Match records to requirements, compare against Veryon, and "
+               "export a gap report.")
+
+    # --- US 4.1: match records to requirements ------------------------------
+    st.subheader("1 · Match records to requirements")
+    if st.button("Run compliance matching"):
+        with st.spinner("Pre-filtering and confirming matches with Qwen…"):
+            st.session_state["match_summary"] = compliance_engine.run_matching()
+
+    summary = st.session_state.get("match_summary")
+    if summary:
+        cols = st.columns(3)
+        cols[0].metric("Complied", summary["complied"])
+        cols[1].metric("Needs Review", summary["needs_review"])
+        cols[2].metric("Outstanding", summary["outstanding"])
+        report = [dict(r) for r in database.compliance_report()]
+        if report:
+            st.dataframe(report, use_container_width=True)
+
+    # --- US 4.2: compare against Veryon -------------------------------------
+    st.subheader("2 · Compare against Veryon export")
+    if st.button("Compare to Veryon"):
+        st.session_state["veryon_gap"] = compliance_engine.compare_to_veryon()
+
+    gap = st.session_state.get("veryon_gap")
+    if gap:
+        cat = st.radio(
+            "Category", ["matched", "missing_in_veryon", "missing_in_records"],
+            format_func=lambda k: {
+                "matched": f"Matched ({len(gap['matched'])})",
+                "missing_in_veryon":
+                    f"Missing from Veryon ({len(gap['missing_in_veryon'])})",
+                "missing_in_records":
+                    f"Missing from records ({len(gap['missing_in_records'])})",
+            }[k], horizontal=True)
+        st.dataframe(gap[cat] or [{"info": "none"}], use_container_width=True)
+
+    # --- US 4.3: export gap report to Excel ---------------------------------
+    st.subheader("3 · Export gap report")
+    tail = st.text_input("Aircraft tail number", placeholder="e.g. N109SP")
+    if st.button("Generate Excel gap report"):
+        with st.spinner("Building workbook…"):
+            out_xlsx = excel_export.build_gap_report(tail, OUTPUT_DIR)
+        st.success(f"Report generated: {out_xlsx.name}")
+        st.download_button(
+            "⬇️ Download gap report", data=out_xlsx.read_bytes(),
+            file_name=out_xlsx.name,
+            mime="application/vnd.openxmlformats-officedocument."
+                 "spreadsheetml.sheet")
+
+
 PAGES = {
     "Dashboard": page_dashboard,
     "Upload Records": page_upload_records,
     "Upload Requirements": page_upload_requirements,
     "Upload Veryon Export": page_upload_veryon,
     "Reconstruct Form": page_reconstruct,
+    "Gap Analysis": page_gap_analysis,
 }
 
 
@@ -319,7 +375,7 @@ def main() -> None:
 
     choice = st.sidebar.radio("Navigate", list(PAGES.keys()))
     st.sidebar.markdown("---")
-    st.sidebar.caption("Sprint 3: form reconstruction")
+    st.sidebar.caption("Sprint 4: compliance gap analysis")
 
     if choice == "Dashboard":
         page_dashboard(db_path)

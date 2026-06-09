@@ -32,7 +32,18 @@ your machine — no internet or hosting required.
 - Generate a filled PDF by overlaying text at template coordinates
   (`pdf_writer.fill_pdf`, reportlab + pypdf).
 
-Later sprints add gap analysis (Sprint 4) and a template builder (Sprint 5).
+**Sprint 4 — Compliance Gap Analysis** ✅
+
+- Match records to requirements: deterministic keyword pre-filter, then Qwen
+  confirmation with a confidence score; low-confidence matches flagged for
+  review (`compliance_engine.run_matching`). Degrades to keyword-only scoring
+  when Qwen is unavailable.
+- Compare against the Veryon export: matched / missing-from-Veryon /
+  missing-from-records (`compliance_engine.compare_to_veryon`).
+- Export a color-coded Excel gap report with three tabs, named by date and tail
+  number (`excel_export.build_gap_report`).
+
+Later sprints add a template builder (Sprint 5).
 
 ### Architecture note: how much actually needs the LLM?
 
