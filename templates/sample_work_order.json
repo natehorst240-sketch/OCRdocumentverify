@@ -1,0 +1,13 @@
+{
+  "form_type": "Sample Work Order",
+  "aircraft_type": "AW109SP",
+  "fields": [
+    {"name": "work_order_no", "x": 430.0, "y": 712.0, "page": 0},
+    {"name": "date", "x": 430.0, "y": 690.0, "page": 0},
+    {"name": "aircraft_tail", "x": 120.0, "y": 690.0, "page": 0},
+    {"name": "description", "x": 72.0, "y": 600.0, "page": 0},
+    {"name": "hours", "x": 430.0, "y": 600.0, "page": 0},
+    {"name": "technician", "x": 120.0, "y": 120.0, "page": 0},
+    {"name": "signature", "x": 300.0, "y": 120.0, "page": 0}
+  ]
+}
