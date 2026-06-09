@@ -77,3 +77,16 @@ def save_template(template: dict) -> Path:
 
 def field_names(template: dict) -> list[str]:
     return [f["name"] for f in template.get("fields", []) if f.get("name")]
+
+
+def delete_template(form_type: str) -> int:
+    """Delete a template and its sibling files (PDF, corrections). Returns count."""
+    slug = slugify(form_type)
+    removed = 0
+    for path in TEMPLATES_DIR.glob(f"{slug}.*"):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed

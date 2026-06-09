@@ -356,6 +356,145 @@ def page_gap_analysis() -> None:
                  "spreadsheetml.sheet")
 
 
+@st.cache_data(show_spinner=False)
+def _grid_preview(pdf_path: str, mtime: float, spacing: int = 50) -> str | None:
+    """Render a blank PDF's first page with a labeled point grid as a coordinate
+    aid. Guarded — returns None on any failure so the builder never breaks."""
+    try:
+        import cv2
+        from pypdf import PdfReader
+
+        image_path = ocr.pdf_to_images(pdf_path, UPLOADS_DIR / "templates")[0]
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        media = PdfReader(pdf_path).pages[0].mediabox
+        w_pts, h_pts = float(media.width), float(media.height)
+        sx, sy = w / w_pts, h / h_pts  # pixels per point
+
+        x = 0
+        while x <= w_pts:
+            px = int(x * sx)
+            cv2.line(img, (px, 0), (px, h), (200, 200, 200), 1)
+            cv2.putText(img, str(x), (px + 2, 14),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
+            x += spacing
+        y = 0
+        while y <= h_pts:
+            py = h - int(y * sy)  # PDF y is from the bottom
+            cv2.line(img, (0, py), (w, py), (200, 200, 200), 1)
+            cv2.putText(img, str(y), (2, py - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
+            y += spacing
+        out = OUTPUT_DIR / f"grid_{Path(image_path).stem}.png"
+        cv2.imwrite(str(out), img)
+        return str(out)
+    except Exception:
+        return None
+
+
+def _clean_fields(rows) -> list[dict]:
+    """Coerce edited table rows into clean field dicts; drop unnamed rows."""
+    if not isinstance(rows, list):
+        rows = rows.to_dict("records")  # pandas DataFrame fallback
+    fields = []
+    for r in rows:
+        name = str(r.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            x = float(r.get("x") or 0)
+        except (TypeError, ValueError):
+            x = 0.0
+        try:
+            y = float(r.get("y") or 0)
+        except (TypeError, ValueError):
+            y = 0.0
+        try:
+            page = int(float(r.get("page") or 0))
+        except (TypeError, ValueError):
+            page = 0
+        fields.append({"name": name, "x": x, "y": y, "page": page})
+    return fields
+
+
+def page_template_builder() -> None:
+    st.title("🗂️ Template Builder")
+    st.caption("Map a form's fields once; reused on every future scan. "
+               "Coordinates are PDF points from the bottom-left corner.")
+
+    existing = [t["form_type"] for t in templates.list_templates()]
+    choice = st.selectbox("Template", ["➕ New template"] + existing)
+    is_new = choice == "➕ New template"
+    current = None if is_new else templates.load_template(choice)
+    state_key = "new" if is_new else templates.slugify(choice)
+
+    # Metadata. Keyed by selection so switching templates reloads cleanly.
+    form_type = st.text_input(
+        "Form type (required)",
+        value="" if is_new else (current.get("form_type") or ""),
+        key=f"ft_{state_key}")
+    aircraft_type = st.text_input(
+        "Aircraft type",
+        value="" if is_new else (current.get("aircraft_type") or ""),
+        key=f"at_{state_key}")
+
+    # Optional blank PDF template + coordinate-grid aid.
+    st.markdown("**Blank PDF template** (optional — without one, output is a "
+                "plain page using your coordinates)")
+    pdf_upload = st.file_uploader("Upload blank form PDF", type=["pdf"],
+                                  key=f"pdf_{state_key}")
+    pdf_rel = current.get("pdf_template") if current else None
+    if pdf_upload and form_type.strip():
+        slug = templates.slugify(form_type)
+        saved_pdf = templates.TEMPLATES_DIR / f"{slug}.pdf"
+        saved_pdf.write_bytes(pdf_upload.getbuffer())
+        pdf_rel = f"templates/{slug}.pdf"
+
+    pdf_abs = (BASE_DIR / pdf_rel) if pdf_rel else None
+    if pdf_abs and pdf_abs.exists():
+        grid = _grid_preview(str(pdf_abs), pdf_abs.stat().st_mtime)
+        if grid:
+            st.image(grid, caption="Read x/y in points off the grid",
+                     use_container_width=True)
+        else:
+            st.info("Preview unavailable; enter coordinates from a PDF viewer.")
+
+    # Field map table — built-in editor, add/remove rows freely.
+    st.markdown("**Fields**")
+    seed = (current.get("fields") if current else None) or \
+        [{"name": "", "x": 0, "y": 0, "page": 0}]
+    edited = st.data_editor(
+        seed, num_rows="dynamic", use_container_width=True,
+        key=f"fields_{state_key}",
+        column_config={
+            "name": st.column_config.TextColumn("Field name"),
+            "x": st.column_config.NumberColumn("X (pts)"),
+            "y": st.column_config.NumberColumn("Y (pts)"),
+            "page": st.column_config.NumberColumn("Page", min_value=0, step=1),
+        })
+
+    col_save, col_delete = st.columns([3, 1])
+    with col_save:
+        if st.button("Save template", type="primary"):
+            if not form_type.strip():
+                st.error("Form type is required.")
+            else:
+                template = {"form_type": form_type.strip(),
+                            "aircraft_type": aircraft_type.strip() or None,
+                            "fields": _clean_fields(edited)}
+                if pdf_rel:
+                    template["pdf_template"] = pdf_rel
+                path = templates.save_template(template)
+                st.success(f"Saved {path.name} "
+                           f"({len(template['fields'])} field(s)).")
+    with col_delete:
+        if not is_new and st.button("Delete"):
+            templates.delete_template(choice)
+            st.warning(f"Deleted '{choice}'. Reselect a template.")
+
+
 PAGES = {
     "Dashboard": page_dashboard,
     "Upload Records": page_upload_records,
@@ -363,6 +502,7 @@ PAGES = {
     "Upload Veryon Export": page_upload_veryon,
     "Reconstruct Form": page_reconstruct,
     "Gap Analysis": page_gap_analysis,
+    "Template Builder": page_template_builder,
 }
 
 
@@ -375,7 +515,7 @@ def main() -> None:
 
     choice = st.sidebar.radio("Navigate", list(PAGES.keys()))
     st.sidebar.markdown("---")
-    st.sidebar.caption("Sprint 4: compliance gap analysis")
+    st.sidebar.caption("Sprint 5: template builder")
 
     if choice == "Dashboard":
         page_dashboard(db_path)

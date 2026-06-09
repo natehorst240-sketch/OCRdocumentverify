@@ -43,7 +43,19 @@ your machine — no internet or hosting required.
 - Export a color-coded Excel gap report with three tabs, named by date and tail
   number (`excel_export.build_gap_report`).
 
-Later sprints add a template builder (Sprint 5).
+**Sprint 5 — Template Management** ✅
+
+- Build a form template without editing code: name it, tag the aircraft type,
+  optionally attach a blank PDF, and enter field coordinates in a table
+  (`Template Builder` page, `templates.py`).
+- A guarded coordinate-grid preview of the blank PDF helps read off X/Y points;
+  it degrades to a plain message if rendering fails.
+- Templates are saved as JSON in `/templates`, reused on every future scan, and
+  editable or deletable. This unblocks the full **Reconstruct Form** flow.
+
+All five sprints are complete. The design is intentionally spartan: numeric
+coordinate entry via Streamlit's built-in data editor rather than a fragile
+click-to-place component.
 
 ### Architecture note: how much actually needs the LLM?
 
