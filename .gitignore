@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# App data
+records.db
+records.db-journal
+uploads/*
+output/*
+!uploads/.gitkeep
+!output/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

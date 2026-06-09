@@ -1,0 +1,30 @@
+# No-LLM deployment — for low-RAM hosts (e.g. an 8 GB N100).
+# Runs the deterministic pipeline with manual entry and keyword matching; no
+# Ollama service, so it fits comfortably in 8 GB. Point staff who need LLM
+# smarts at the full stack (docker-compose.yml) on a beefier box instead.
+#
+#   docker compose -f docker-compose.nollm.yml up -d
+#
+# All state lives under ./data, same as the full stack — backups are identical.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - DISABLE_LLM=1
+      - RECORDS_DB=/data/records.db
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data/db:/data
+      - ./data/uploads:/app/uploads
+      - ./data/output:/app/output
+      - ./data/templates:/app/templates
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

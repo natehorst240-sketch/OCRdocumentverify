@@ -1,0 +1,13 @@
+streamlit
+pandas
+openpyxl
+opencv-python
+pytesseract
+paddleocr
+pdfplumber
+pdf2image
+pypdf
+reportlab
+requests
+numpy
+pillow

@@ -1,0 +1,76 @@
+# Full-package deployment for a home server: Streamlit app + local Ollama LLM.
+#
+#   docker compose up -d            # build, pull the model, start everything
+#   docker compose logs -f app      # watch the app
+#   scripts/backup.sh               # snapshot the data volume
+#
+# All persistent state lives under ./data on the host, so backups are just a
+# copy of that one folder. The model is pulled automatically on first start.
+
+services:
+  # --- Local LLM (plays the "Qwen" role) ----------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # --- GPU (recommended for qwen2.5:7b) -------------------------------
+    # Requires the NVIDIA Container Toolkit on the host. Uncomment to enable;
+    # CPU-only works without this block (use QWEN_MODEL=qwen2.5:3b for speed).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # --- One-shot: pull the model, then exit --------------------------------
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull ${QWEN_MODEL:-qwen2.5:7b}"]
+    restart: "no"
+
+  # --- The application ----------------------------------------------------
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - QWEN_MODEL=${QWEN_MODEL:-qwen2.5:7b}
+      - RECORDS_DB=/data/records.db
+    ports:
+      - "8501:8501"
+    volumes:
+      # One host folder holds everything → back up ./data and you have it all.
+      - ./data/db:/data
+      - ./data/uploads:/app/uploads
+      - ./data/output:/app/output
+      - ./data/templates:/app/templates
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  ollama_models:
