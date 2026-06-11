@@ -604,23 +604,28 @@ def page_upload_inspections() -> None:
                "tables. Tables are read directly — no OCR or LLM. Review the "
                "applicability column carefully before saving.")
 
-    uploaded = st.file_uploader("Upload maintenance manual PDF", type=["pdf"])
+    uploaded = st.file_uploader("Upload maintenance manual PDF(s)",
+                                type=["pdf"], accept_multiple_files=True)
     if uploaded and st.button("Extract inspection tables"):
-        saved = save_upload(uploaded, subdir="inspections")
-        with st.spinner("Reading schedule tables…"):
-            try:
-                rows = inspection_parser.parse_inspections(saved)
-            except Exception as exc:
-                st.error(f"Table extraction failed: {exc}")
-                rows = []
-        if not rows:
-            st.warning("No inspection tables detected. Confirm the PDF is "
-                       "digital (selectable text), not a scan.")
-        else:
+        all_rows = []
+        for f in uploaded:
+            saved = save_upload(f, subdir="inspections")
+            with st.spinner(f"Reading {f.name}…"):
+                try:
+                    rows = inspection_parser.parse_inspections(saved)
+                except Exception as exc:
+                    st.error(f"Extraction failed for {f.name}: {exc}")
+                    rows = []
             for r in rows:
                 r["req_type"] = "Scheduled Inspection"
-            st.session_state["insp_rows"] = rows
-            st.session_state["insp_source"] = uploaded.name
+                r["source_file"] = f.name
+            st.write(f"• {f.name}: {len(rows)} task(s)")
+            all_rows.extend(rows)
+        if not all_rows:
+            st.warning("No inspection tables detected. Confirm the PDFs are "
+                       "digital (selectable text), not scans.")
+        else:
+            st.session_state["insp_rows"] = all_rows
 
     rows = st.session_state.get("insp_rows")
     if not rows:
@@ -641,6 +646,7 @@ def page_upload_inspections() -> None:
             "req_type": st.column_config.SelectboxColumn(
                 "Type", options=["Scheduled Inspection",
                                  "Airworthiness Limitation"]),
+            "source_file": st.column_config.TextColumn("Source", disabled=True),
             "source_page": st.column_config.NumberColumn("Pg", disabled=True),
         })
 
@@ -661,7 +667,7 @@ def page_upload_inspections() -> None:
                           if r.get("interval") else None),
                 applicability=(str(r.get("applicability")).strip()
                                if r.get("applicability") else None),
-                source_file=st.session_state.get("insp_source", "inspections"))
+                source_file=r.get("source_file") or "inspections")
             added += 1 if new_id else 0
             skipped += 0 if new_id else 1
         st.success(f"Saved {added} inspection(s); {skipped} duplicate(s) "
