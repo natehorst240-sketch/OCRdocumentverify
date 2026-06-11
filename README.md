@@ -57,6 +57,24 @@ All five sprints are complete. The design is intentionally spartan: numeric
 coordinate entry via Streamlit's built-in data editor rather than a fragile
 click-to-place component.
 
+**Scheduled Inspections & Aircraft Config** (post-sprint, field-driven)
+
+- **Upload Inspections** — OEM maintenance-manual Chapter 4 (Airworthiness
+  Limitations) and Chapter 5 (Time Limits / Scheduled Maintenance) tables are
+  extracted with pdfplumber (deterministic — no OCR/LLM), reviewed in an
+  editable grid, and stored as requirements (`inspection_parser.py`). These are
+  the bulk of a real inspection program.
+- **Aircraft Profile** — per-tail configuration (serial number, installed
+  optional equipment, installed part numbers) that applicability decisions
+  depend on, since manuals are generic.
+- **Applicability engine** (`applicability.py`) — resolves each requirement
+  against the active aircraft into Applies / Not applicable / Review. Strictly
+  conservative: the only automatic exclusion is a confident serial-range miss;
+  anything unresolved stays Review and is still treated as applicable, so a
+  required inspection is never silently dropped. Deterministic (runs on the
+  no-LLM N100). Gap Analysis shows the Applies/Review/N-A counts and hides
+  not-applicable items by default.
+
 ### Architecture note: how much actually needs the LLM?
 
 Most of the pipeline is a deterministic Python engine — OCR (PaddleOCR), PDF
@@ -161,7 +179,34 @@ and point `OLLAMA_HOST` at the desktop instead.)
 - **Auth** — Streamlit has no built-in login; keep it on a trusted LAN or front
   it with a reverse proxy / Cloudflare Tunnel for HTTPS + access control.
 
-## Configuration
+## Distribute to someone without Docker (portable Windows bundle)
+
+For a recipient who can't install Docker or anything else (locked-down machine,
+no admin rights), build a **self-contained portable folder** — a private Python
+runtime + the app + a double-click launcher.
+
+**You build it once** (on any Windows machine with internet):
+
+```bat
+build_portable.bat
+```
+
+This downloads an embeddable Python into `.\runtime` and installs the
+dependencies into it (uses `requirements-lite.txt` — no OCR stack, small and
+reliable; run `build_portable.bat full` for the heavy OCR build). Then:
+
+1. Delete `.venv\` and `__pycache__\` to keep the size down.
+2. **Zip the whole folder** and send it (e.g. via file share).
+
+**The recipient** unzips it anywhere and **double-clicks `run.bat`** — a browser
+opens at `http://localhost:8501`. No Docker, no installer, no admin rights. It
+runs in no-LLM mode, bound to localhost only (nothing exposed on their network).
+
+What works in the lite bundle: inspections, requirements, Veryon import, gap
+analysis, applicability, templates, filled-PDF output. What needs the full build
+(+ a separate Ollama install): live OCR of scanned records and Reconstruct Form.
+
+
 
 Environment variables (all optional):
 

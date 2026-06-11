@@ -1,0 +1,15 @@
+# Dependencies for the portable / no-Docker distribution.
+# Drops the heavy OCR stack (paddleocr, opencv, pdf2image) so the bundle stays
+# small and reliable. Everything except live OCR of *scanned* records works:
+# inspections, requirements, Veryon, gap analysis, applicability, templates,
+# filled-PDF output. The "Upload Records" and "Reconstruct Form" pages need the
+# full requirements.txt + a separate Ollama install.
+streamlit
+pandas
+openpyxl
+pdfplumber
+pypdf
+reportlab
+requests
+numpy
+pillow

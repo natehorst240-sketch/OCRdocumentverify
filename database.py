@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS compliance (
     FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL
 );
 
+-- One row per tail: the configuration that drives applicability decisions.
+CREATE TABLE IF NOT EXISTS aircraft (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    tail_number        TEXT NOT NULL UNIQUE,
+    serial_number      TEXT,
+    model              TEXT,
+    optional_equipment TEXT,   -- one item per line: installed optional kits
+    installed_parts    TEXT,   -- one item per line: installed part numbers
+    notes              TEXT,
+    created_at         TEXT DEFAULT (datetime('now'))
+);
+
 -- SQLite treats NULLs as distinct in a UNIQUE constraint, so the inline
 -- UNIQUE on requirements does not dedup rows with a NULL doc_number/req_type.
 -- This expression index normalizes NULLs so dedup works for manual entries too.
@@ -91,7 +103,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_requirements_dedup ON requirements (
 # Tables the app is allowed to address by name. Keeps the dynamic-table helpers
 # below safe from SQL injection even though all current callers pass literals.
 VALID_TABLES = frozenset({
-    "documents", "pages", "requirements", "veryon_tasks", "compliance"})
+    "documents", "pages", "requirements", "veryon_tasks", "compliance",
+    "aircraft"})
 
 
 def _check_table(table: str) -> str:
@@ -222,6 +235,27 @@ def add_compliance(requirement_id: int, page_id: int | None, status: str,
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (requirement_id, page_id, status, confidence, compliance_date,
              compliance_hours, notes),
+        )
+        return cur.lastrowid
+
+
+def save_aircraft(tail_number: str, serial_number: str | None = None,
+                  model: str | None = None,
+                  optional_equipment: str | None = None,
+                  installed_parts: str | None = None, notes: str | None = None,
+                  db_path: Path = DB_PATH) -> int:
+    """Insert or update an aircraft's configuration, keyed by tail number."""
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO aircraft (tail_number, serial_number, model, "
+            "optional_equipment, installed_parts, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tail_number) DO UPDATE SET "
+            "serial_number=excluded.serial_number, model=excluded.model, "
+            "optional_equipment=excluded.optional_equipment, "
+            "installed_parts=excluded.installed_parts, notes=excluded.notes",
+            (tail_number, serial_number, model, optional_equipment,
+             installed_parts, notes),
         )
         return cur.lastrowid
 

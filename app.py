@@ -5,15 +5,19 @@ Sprint 2: ingestion + OCR for scanned records, AD/ASB/ICA requirement PDFs,
           and Veryon Excel exports.
 """
 
+import uuid
 from pathlib import Path
 
 import streamlit as st
 
+import access_control
+import applicability
 import compliance_engine
 import database
 import excel_export
 import field_mapper
 import form_detector
+import inspection_parser
 import ocr
 import pdf_parser
 import pdf_writer
@@ -173,7 +177,9 @@ def _manual_requirements() -> None:
     with st.form("add_requirement", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         doc_number = c1.text_input("Doc number", placeholder="AD 2021-12-05")
-        req_type = c2.selectbox("Type", ["AD", "ASB", "ICA", "Other"])
+        req_type = c2.selectbox("Type", [
+            "AD", "ASB", "ICA", "Scheduled Inspection",
+            "Airworthiness Limitation", "Other"])
         interval = c3.text_input("Interval", placeholder="100 hrs / one-time")
         description = st.text_input("Description (required)")
         applicability = st.text_input("Applicability")
@@ -368,6 +374,18 @@ def page_gap_analysis() -> None:
     st.caption("Match records to requirements, compare against Veryon, and "
                "export a gap report.")
 
+    # Active aircraft drives applicability filtering of generic inspections.
+    fleet = [dict(a) for a in database.fetch_all("aircraft")]
+    aircraft = None
+    if fleet:
+        tail = st.selectbox(
+            "Active aircraft (for applicability)",
+            ["(none)"] + [a["tail_number"] for a in fleet])
+        aircraft = next((a for a in fleet if a["tail_number"] == tail), None)
+    else:
+        st.caption("Add an Aircraft Profile to filter inspections by "
+                   "applicability.")
+
     # --- US 4.1: match records to requirements ------------------------------
     st.subheader("1 · Match records to requirements")
     if st.button("Run compliance matching"):
@@ -380,7 +398,31 @@ def page_gap_analysis() -> None:
         cols[0].metric("Complied", summary["complied"])
         cols[1].metric("Needs Review", summary["needs_review"])
         cols[2].metric("Outstanding", summary["outstanding"])
+
         report = [dict(r) for r in database.compliance_report()]
+        # Annotate each requirement with applicability for the active aircraft.
+        reqs = database.fetch_all("requirements")
+        verdicts = applicability.evaluate_all(reqs, aircraft)
+        for row in report:
+            status, reason = verdicts.get(row["requirement_id"],
+                                          (applicability.REVIEW, ""))
+            row["applicability"] = status
+            row["applicability_reason"] = reason
+
+        if aircraft:
+            counts = {"applies": 0, "review": 0, "not_applicable": 0}
+            for row in report:
+                counts[row["applicability"]] = counts.get(
+                    row["applicability"], 0) + 1
+            acols = st.columns(3)
+            acols[0].metric("Applies", counts["applies"])
+            acols[1].metric("Review", counts["review"])
+            acols[2].metric("Not applicable", counts["not_applicable"])
+            show_na = st.checkbox("Show not-applicable items", value=False)
+            if not show_na:
+                report = [r for r in report
+                          if r["applicability"] != applicability.NOT_APPLICABLE]
+
         if report:
             st.dataframe(report, use_container_width=True)
 
@@ -558,10 +600,137 @@ def page_template_builder() -> None:
                 st.rerun()
 
 
+def page_upload_inspections() -> None:
+    st.title("🗓️ Scheduled Inspections (MM Ch 4/5)")
+    st.caption("Upload OEM maintenance-manual chapters with inspection schedule "
+               "tables. Tables are read directly — no OCR or LLM. Review the "
+               "applicability column carefully before saving.")
+
+    uploaded = st.file_uploader("Upload maintenance manual PDF(s)",
+                                type=["pdf"], accept_multiple_files=True)
+    if uploaded and st.button("Extract inspection tables"):
+        all_rows = []
+        for f in uploaded:
+            saved = save_upload(f, subdir="inspections")
+            with st.spinner(f"Reading {f.name}…"):
+                try:
+                    rows = inspection_parser.parse_inspections(saved)
+                except Exception as exc:
+                    st.error(f"Extraction failed for {f.name}: {exc}")
+                    rows = []
+            for r in rows:
+                r["req_type"] = "Scheduled Inspection"
+                r["source_file"] = f.name
+            st.write(f"• {f.name}: {len(rows)} task(s)")
+            all_rows.extend(rows)
+        if not all_rows:
+            st.warning("No inspection tables detected. Confirm the PDFs are "
+                       "digital (selectable text), not scans.")
+        else:
+            st.session_state["insp_rows"] = all_rows
+
+    rows = st.session_state.get("insp_rows")
+    if not rows:
+        return
+
+    st.subheader(f"Review {len(rows)} extracted task(s)")
+    st.caption("Fix any mis-read columns, set the type, and delete rows that "
+               "aren't inspections. Applicability is captured verbatim from the "
+               "manual — keep the serial/part/optional-equipment conditions.")
+    edited = st.data_editor(
+        rows, num_rows="dynamic", use_container_width=True, key="insp_editor",
+        column_config={
+            "doc_number": st.column_config.TextColumn("Task / Item"),
+            "description": st.column_config.TextColumn("Description", width="large"),
+            "interval": st.column_config.TextColumn("Interval"),
+            "applicability": st.column_config.TextColumn(
+                "Applicability", width="large"),
+            "req_type": st.column_config.SelectboxColumn(
+                "Type", options=["Scheduled Inspection",
+                                 "Airworthiness Limitation"]),
+            "source_file": st.column_config.TextColumn("Source", disabled=True),
+            "source_page": st.column_config.NumberColumn("Pg", disabled=True),
+        })
+
+    if st.button("Save inspections", type="primary"):
+        records = list(edited) if isinstance(edited, list) else \
+            edited.to_dict("records")
+        added, skipped = 0, 0
+        for r in records:
+            desc = str(r.get("description") or "").strip()
+            if not desc:
+                continue
+            new_id = database.add_requirement(
+                doc_number=(str(r.get("doc_number")).strip()
+                            if r.get("doc_number") else None),
+                req_type=r.get("req_type") or "Scheduled Inspection",
+                description=desc,
+                interval=(str(r.get("interval")).strip()
+                          if r.get("interval") else None),
+                applicability=(str(r.get("applicability")).strip()
+                               if r.get("applicability") else None),
+                source_file=r.get("source_file") or "inspections")
+            added += 1 if new_id else 0
+            skipped += 0 if new_id else 1
+        st.success(f"Saved {added} inspection(s); {skipped} duplicate(s) "
+                   "skipped.")
+        st.session_state.pop("insp_rows", None)
+
+
+def page_aircraft_profile() -> None:
+    st.title("✈️ Aircraft Profile")
+    st.caption("The configuration that decides which generic manual inspections "
+               "actually apply to this tail — serial number, optional equipment, "
+               "and installed part numbers.")
+
+    existing = [dict(a) for a in database.fetch_all("aircraft")]
+    tails = [a["tail_number"] for a in existing]
+    choice = st.selectbox("Aircraft", ["➕ New aircraft"] + tails)
+    current = next((a for a in existing if a["tail_number"] == choice), None)
+    key = "new" if current is None else choice
+
+    tail = st.text_input("Tail number (required)",
+                         value=(current["tail_number"] if current else ""),
+                         key=f"tail_{key}")
+    c1, c2 = st.columns(2)
+    serial = c1.text_input("Serial number",
+                           value=(current["serial_number"] if current else "") or "",
+                           key=f"sn_{key}")
+    model = c2.text_input("Model", value=(current["model"] if current else "") or "",
+                          key=f"model_{key}")
+    optional = st.text_area(
+        "Installed optional equipment (one per line)",
+        value=(current["optional_equipment"] if current else "") or "",
+        key=f"opt_{key}",
+        help="e.g. emergency float kit, wire strike protection, HTAWS")
+    parts = st.text_area(
+        "Installed part numbers (one per line)",
+        value=(current["installed_parts"] if current else "") or "",
+        key=f"parts_{key}")
+    notes = st.text_input("Notes", value=(current["notes"] if current else "") or "",
+                          key=f"notes_{key}")
+
+    if st.button("Save aircraft", type="primary"):
+        if not tail.strip():
+            st.error("Tail number is required.")
+        else:
+            database.save_aircraft(
+                tail.strip(), serial.strip() or None, model.strip() or None,
+                optional.strip() or None, parts.strip() or None,
+                notes.strip() or None)
+            st.success(f"Saved configuration for {tail.strip()}.")
+
+    st.info("Next step (in design): use this profile to flag each manual "
+            "inspection as Applies / Not applicable / Review before gap "
+            "analysis, so you only chase inspections relevant to this tail.")
+
+
 PAGES = {
     "Dashboard": page_dashboard,
+    "Aircraft Profile": page_aircraft_profile,
     "Upload Records": page_upload_records,
     "Upload Requirements": page_upload_requirements,
+    "Upload Inspections": page_upload_inspections,
     "Upload Veryon Export": page_upload_veryon,
     "Reconstruct Form": page_reconstruct,
     "Gap Analysis": page_gap_analysis,
@@ -574,6 +743,24 @@ def main() -> None:
         page_title="Aviation Maintenance Records Processor",
         page_icon="🛩️", layout="wide",
     )
+
+    # Business-hours gate (hosted instance only; no-op locally).
+    is_open, schedule = access_control.business_open()
+    if not is_open:
+        st.title("🛩️ Temporarily closed")
+        st.info(f"This tool is available {schedule}. Please check back then.")
+        st.stop()
+
+    # Single-user gate: hold one active session at a time.
+    session_id = st.session_state.setdefault("session_id", uuid.uuid4().hex)
+    if not access_control.acquire_single_user(session_id):
+        st.title("🛩️ In use")
+        st.warning("Someone else is using the tool right now. Please try "
+                   "again in a few minutes.")
+        if st.button("Retry"):
+            st.rerun()
+        st.stop()
+
     db_path = bootstrap()
 
     choice = st.sidebar.radio("Navigate", list(PAGES.keys()))
