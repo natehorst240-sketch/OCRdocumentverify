@@ -9,6 +9,7 @@ from pathlib import Path
 
 import streamlit as st
 
+import applicability
 import compliance_engine
 import database
 import excel_export
@@ -371,6 +372,18 @@ def page_gap_analysis() -> None:
     st.caption("Match records to requirements, compare against Veryon, and "
                "export a gap report.")
 
+    # Active aircraft drives applicability filtering of generic inspections.
+    fleet = [dict(a) for a in database.fetch_all("aircraft")]
+    aircraft = None
+    if fleet:
+        tail = st.selectbox(
+            "Active aircraft (for applicability)",
+            ["(none)"] + [a["tail_number"] for a in fleet])
+        aircraft = next((a for a in fleet if a["tail_number"] == tail), None)
+    else:
+        st.caption("Add an Aircraft Profile to filter inspections by "
+                   "applicability.")
+
     # --- US 4.1: match records to requirements ------------------------------
     st.subheader("1 · Match records to requirements")
     if st.button("Run compliance matching"):
@@ -383,7 +396,31 @@ def page_gap_analysis() -> None:
         cols[0].metric("Complied", summary["complied"])
         cols[1].metric("Needs Review", summary["needs_review"])
         cols[2].metric("Outstanding", summary["outstanding"])
+
         report = [dict(r) for r in database.compliance_report()]
+        # Annotate each requirement with applicability for the active aircraft.
+        reqs = database.fetch_all("requirements")
+        verdicts = applicability.evaluate_all(reqs, aircraft)
+        for row in report:
+            status, reason = verdicts.get(row["requirement_id"],
+                                          (applicability.REVIEW, ""))
+            row["applicability"] = status
+            row["applicability_reason"] = reason
+
+        if aircraft:
+            counts = {"applies": 0, "review": 0, "not_applicable": 0}
+            for row in report:
+                counts[row["applicability"]] = counts.get(
+                    row["applicability"], 0) + 1
+            acols = st.columns(3)
+            acols[0].metric("Applies", counts["applies"])
+            acols[1].metric("Review", counts["review"])
+            acols[2].metric("Not applicable", counts["not_applicable"])
+            show_na = st.checkbox("Show not-applicable items", value=False)
+            if not show_na:
+                report = [r for r in report
+                          if r["applicability"] != applicability.NOT_APPLICABLE]
+
         if report:
             st.dataframe(report, use_container_width=True)
 

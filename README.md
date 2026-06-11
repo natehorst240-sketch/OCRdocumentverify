@@ -66,8 +66,14 @@ click-to-place component.
   the bulk of a real inspection program.
 - **Aircraft Profile** — per-tail configuration (serial number, installed
   optional equipment, installed part numbers) that applicability decisions
-  depend on, since manuals are generic. Foundation for filtering which
-  inspections actually apply to a given aircraft.
+  depend on, since manuals are generic.
+- **Applicability engine** (`applicability.py`) — resolves each requirement
+  against the active aircraft into Applies / Not applicable / Review. Strictly
+  conservative: the only automatic exclusion is a confident serial-range miss;
+  anything unresolved stays Review and is still treated as applicable, so a
+  required inspection is never silently dropped. Deterministic (runs on the
+  no-LLM N100). Gap Analysis shows the Applies/Review/N-A counts and hides
+  not-applicable items by default.
 
 ### Architecture note: how much actually needs the LLM?
 
