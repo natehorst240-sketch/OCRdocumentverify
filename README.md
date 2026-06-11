@@ -179,7 +179,34 @@ and point `OLLAMA_HOST` at the desktop instead.)
 - **Auth** — Streamlit has no built-in login; keep it on a trusted LAN or front
   it with a reverse proxy / Cloudflare Tunnel for HTTPS + access control.
 
-## Configuration
+## Distribute to someone without Docker (portable Windows bundle)
+
+For a recipient who can't install Docker or anything else (locked-down machine,
+no admin rights), build a **self-contained portable folder** — a private Python
+runtime + the app + a double-click launcher.
+
+**You build it once** (on any Windows machine with internet):
+
+```bat
+build_portable.bat
+```
+
+This downloads an embeddable Python into `.\runtime` and installs the
+dependencies into it (uses `requirements-lite.txt` — no OCR stack, small and
+reliable; run `build_portable.bat full` for the heavy OCR build). Then:
+
+1. Delete `.venv\` and `__pycache__\` to keep the size down.
+2. **Zip the whole folder** and send it (e.g. via file share).
+
+**The recipient** unzips it anywhere and **double-clicks `run.bat`** — a browser
+opens at `http://localhost:8501`. No Docker, no installer, no admin rights. It
+runs in no-LLM mode, bound to localhost only (nothing exposed on their network).
+
+What works in the lite bundle: inspections, requirements, Veryon import, gap
+analysis, applicability, templates, filled-PDF output. What needs the full build
+(+ a separate Ollama install): live OCR of scanned records and Reconstruct Form.
+
+
 
 Environment variables (all optional):
 
