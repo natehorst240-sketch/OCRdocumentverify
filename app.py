@@ -5,10 +5,12 @@ Sprint 2: ingestion + OCR for scanned records, AD/ASB/ICA requirement PDFs,
           and Veryon Excel exports.
 """
 
+import uuid
 from pathlib import Path
 
 import streamlit as st
 
+import access_control
 import applicability
 import compliance_engine
 import database
@@ -741,6 +743,24 @@ def main() -> None:
         page_title="Aviation Maintenance Records Processor",
         page_icon="🛩️", layout="wide",
     )
+
+    # Business-hours gate (hosted instance only; no-op locally).
+    is_open, schedule = access_control.business_open()
+    if not is_open:
+        st.title("🛩️ Temporarily closed")
+        st.info(f"This tool is available {schedule}. Please check back then.")
+        st.stop()
+
+    # Single-user gate: hold one active session at a time.
+    session_id = st.session_state.setdefault("session_id", uuid.uuid4().hex)
+    if not access_control.acquire_single_user(session_id):
+        st.title("🛩️ In use")
+        st.warning("Someone else is using the tool right now. Please try "
+                   "again in a few minutes.")
+        if st.button("Retry"):
+            st.rerun()
+        st.stop()
+
     db_path = bootstrap()
 
     choice = st.sidebar.radio("Navigate", list(PAGES.keys()))
