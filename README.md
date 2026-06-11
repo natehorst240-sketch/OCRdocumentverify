@@ -57,6 +57,18 @@ All five sprints are complete. The design is intentionally spartan: numeric
 coordinate entry via Streamlit's built-in data editor rather than a fragile
 click-to-place component.
 
+**Scheduled Inspections & Aircraft Config** (post-sprint, field-driven)
+
+- **Upload Inspections** — OEM maintenance-manual Chapter 4 (Airworthiness
+  Limitations) and Chapter 5 (Time Limits / Scheduled Maintenance) tables are
+  extracted with pdfplumber (deterministic — no OCR/LLM), reviewed in an
+  editable grid, and stored as requirements (`inspection_parser.py`). These are
+  the bulk of a real inspection program.
+- **Aircraft Profile** — per-tail configuration (serial number, installed
+  optional equipment, installed part numbers) that applicability decisions
+  depend on, since manuals are generic. Foundation for filtering which
+  inspections actually apply to a given aircraft.
+
 ### Architecture note: how much actually needs the LLM?
 
 Most of the pipeline is a deterministic Python engine — OCR (PaddleOCR), PDF
