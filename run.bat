@@ -5,6 +5,13 @@ REM otherwise falls back to a system Python. Runs locally, no-LLM mode.
 cd /d "%~dp0"
 set "DISABLE_LLM=1"
 
+REM Enable the Go handwriting OCR engine when it's bundled alongside the app
+REM (the installer and portable bundle ship handwriting.exe next to run.bat).
+if exist "%~dp0handwriting.exe" (
+  set "HANDWRITING_OCR=1"
+  set "HANDWRITING_BIN=%~dp0handwriting.exe"
+)
+
 set "PYEXE=%~dp0runtime\python.exe"
 if not exist "%PYEXE%" set "PYEXE=python"
 

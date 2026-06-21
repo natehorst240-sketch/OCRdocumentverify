@@ -199,7 +199,18 @@ and point `OLLAMA_HOST` at the desktop instead.)
 - **Auth** — Streamlit has no built-in login; keep it on a trusted LAN or front
   it with a reverse proxy / Cloudflare Tunnel for HTTPS + access control.
 
-## Distribute to someone without Docker (portable Windows bundle)
+## Distribute to someone without Docker
+
+Two ways to hand the whole app to a Windows user, both bundling a private Python
+runtime + the Go handwriting engine so there's nothing for them to install:
+
+- **A real installer (`setup.exe`)** — Start-Menu shortcut, optional desktop
+  icon, uninstaller. Best for a non-technical recipient. Build it with
+  `build_installer.bat`; see [`WINDOWS_INSTALLER.md`](WINDOWS_INSTALLER.md).
+- **A portable folder/zip** — no install at all; runs from a folder or USB
+  stick. Best for locked-down machines. Covered just below.
+
+### Portable Windows bundle
 
 For a recipient who can't install Docker or anything else (locked-down machine,
 no admin rights), build a **self-contained portable folder** — a private Python

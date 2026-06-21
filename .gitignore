@@ -6,6 +6,12 @@ __pycache__/
 venv/
 env/
 
+# Windows installer / portable build artifacts (built on the build machine)
+/runtime/
+/dist_installer/
+/handwriting.exe
+*.iss~
+
 # App data
 records.db
 records.db-journal
