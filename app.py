@@ -17,6 +17,7 @@ import database
 import excel_export
 import field_mapper
 import form_detector
+import handwriting_ocr
 import inspection_parser
 import ocr
 import pdf_parser
@@ -725,9 +726,115 @@ def page_aircraft_profile() -> None:
             "analysis, so you only chase inspections relevant to this tail.")
 
 
+def _confidence_overlay(image_path: Path, result: dict):
+    """Draw per-glyph boxes coloured by confidence over the source scan.
+
+    Green = confident, red = shaky. Returns a PIL image, or None if Pillow
+    isn't available (the text result is shown regardless).
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return None
+
+    img = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    glyphs = result.get("glyphs") or []
+    bounds = result.get("line_bounds") or []
+    for li, line in enumerate(glyphs):
+        y0, y1 = (bounds[li] if li < len(bounds) else (0, img.height - 1))
+        for g in line:
+            conf = float(g.get("confidence", 0.0))
+            colour = (int(255 * (1 - conf)), int(255 * conf), 0)  # red->green
+            x0, x1 = g.get("x0", 0), g.get("x1", 0)
+            draw.rectangle([x0, y0, x1, y1], outline=colour, width=2)
+            draw.text((x0, max(0, y0 - 10)), g.get("char", "?"), fill=colour)
+    return img
+
+
+def page_read_handwriting() -> None:
+    """Read a handwritten logbook scan with the local Go neural network.
+
+    This is the dedicated handwriting engine for the one task PaddleOCR (tuned
+    for printed text) handles poorly. It runs fully locally — no LLM, no Python
+    ML stack — by shelling out to the embedded-model Go binary.
+    """
+    st.header("📝 Read Handwritten Log")
+
+    ok, message = handwriting_ocr.is_available()
+    if ok:
+        st.success(message)
+    else:
+        st.warning(message)
+        st.markdown(
+            "**To enable:** build the recognizer and turn it on:\n"
+            "```bash\n"
+            "cd handwriting && make build   # or: make model-emnist for letters\n"
+            "export HANDWRITING_OCR=1\n"
+            "```\n"
+            "Set `HANDWRITING_BIN` if the binary lives elsewhere."
+        )
+        return
+
+    multiline = st.checkbox(
+        "Multi-line page (segment into lines first)", value=True,
+        help="On for a whole logbook page; off for a single line / field box.")
+    min_conf = st.slider(
+        "Flag glyphs below this confidence", 0.0, 1.0, 0.0, 0.05,
+        help="Low-confidence characters are marked with '·' so a human can "
+             "verify them before the reading is trusted.")
+
+    uploaded = st.file_uploader(
+        "Upload a handwritten scan", type=["png", "jpg", "jpeg", "tif", "tiff", "bmp"])
+    if not uploaded:
+        return
+
+    path = save_upload(uploaded, subdir="handwriting")
+    with st.spinner("Recognizing…"):
+        try:
+            result = handwriting_ocr.read_file(
+                str(path), multiline=multiline, min_conf=min_conf)
+        except handwriting_ocr.HandwritingOCRError as exc:
+            st.error(f"Recognition failed: {exc}")
+            return
+
+    mean = result.get("mean_confidence", 0.0)
+    col1, col2 = st.columns(2)
+    col1.metric("Mean confidence", f"{mean:.0%}")
+    col2.metric("Lines read", str(len(result.get("lines") or [])))
+    if mean and mean < 0.6:
+        st.warning(
+            "Low overall confidence — review this transcription before relying "
+            "on it. Training on your own handwritten logs (see "
+            "`handwriting/TRAINING.md`) is the way to improve accuracy.")
+
+    st.subheader("Transcription")
+    st.text_area("Text", result.get("text", ""), height=160)
+
+    overlay = _confidence_overlay(path, result)
+    if overlay is not None:
+        st.subheader("Confidence overlay")
+        st.caption("Green = confident · red = shaky")
+        st.image(overlay, use_column_width=True)
+
+    with st.expander("Per-character detail"):
+        rows = []
+        for li, line in enumerate(result.get("glyphs") or []):
+            for g in line:
+                rows.append({
+                    "line": li,
+                    "char": g.get("char"),
+                    "confidence": round(float(g.get("confidence", 0.0)), 3),
+                    "x0": g.get("x0"), "x1": g.get("x1"),
+                })
+        if rows:
+            st.dataframe(rows, use_container_width=True)
+
+
 PAGES = {
     "Dashboard": page_dashboard,
     "Aircraft Profile": page_aircraft_profile,
+    "Read Handwritten Log": page_read_handwriting,
     "Upload Records": page_upload_records,
     "Upload Requirements": page_upload_requirements,
     "Upload Inspections": page_upload_inspections,

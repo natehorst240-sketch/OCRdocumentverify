@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	_ "image/png"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -49,6 +51,8 @@ func main() {
 		err = cmdRead(os.Args[2:])
 	case "quantize":
 		err = cmdQuantize(os.Args[2:])
+	case "export-glyphs":
+		err = cmdExportGlyphs(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -72,6 +76,7 @@ usage:
   handwriting quantize -in model.gob -out model.q8.gob
   handwriting predict  [-model model.gob] -image glyph.png
   handwriting read     [-model model.gob] -image line.png
+  handwriting export-glyphs -image page.png -out dir/   (label your own logs)
 
 -model is optional when a default model is embedded in the binary.
 run "handwriting <subcommand> -h" for the full flag list.
@@ -84,33 +89,63 @@ func cmdTrain(args []string) error {
 	fs := flag.NewFlagSet("train", flag.ExitOnError)
 	images := fs.String("images", "", "path to IDX images file (.idx/.gz)")
 	labels := fs.String("labels", "", "path to IDX labels file (.idx/.gz)")
+	dir := fs.String("dir", "", "train from a folder of labelled glyph images (one sub-dir per class) instead of IDX")
 	out := fs.String("out", "model.gob", "output model path")
 	alphabet := fs.String("alphabet", "digits", "label set: digits | letters")
+	mapping := fs.String("mapping", "", "EMNIST class->ASCII mapping file (e.g. emnist-balanced-mapping.txt); overrides -alphabet")
 	epochs := fs.Int("epochs", 20, "training epochs")
 	batch := fs.Int("batch", 32, "mini-batch size")
 	lr := fs.Float64("lr", 0.05, "learning rate")
 	hidden := fs.String("hidden", "128", "comma-separated hidden layer sizes")
 	limit := fs.Int("limit", 0, "cap training samples (0 = all; for quick runs)")
 	val := fs.Float64("val", 0.1, "fraction of data held out for validation")
-	emnist := fs.Bool("emnist", false, "treat images as EMNIST (transpose + 1-indexed labels)")
+	emnist := fs.Bool("emnist", false, "EMNIST letters split (transpose + 1-indexed labels)")
+	transpose := fs.Bool("transpose", false, "transpose images (all EMNIST splits store them rotated)")
 	seed := fs.Int64("seed", 1, "random seed")
 	fs.Parse(args)
 
-	if *images == "" || *labels == "" {
-		return fmt.Errorf("train: -images and -labels are required")
+	if *dir == "" && (*images == "" || *labels == "") {
+		return fmt.Errorf("train: provide -dir, or both -images and -labels")
 	}
 
 	labelSet, numClasses, transformLabel := alphabetSpec(*alphabet)
-	if *emnist {
-		// EMNIST letter labels are 1..26; shift to 0..25.
-		transformLabel = func(l int) int { return l - 1 }
+	datasetName := *alphabet
+	var ds *data.Dataset
+	var err error
+
+	if *dir != "" {
+		// Train on the user's own labelled glyph folders (see TRAINING.md).
+		fmt.Printf("loading image folder %s ...\n", *dir)
+		ds, labelSet, err = data.LoadImageDir(*dir)
+		if err != nil {
+			return err
+		}
+		numClasses = len(labelSet)
+		datasetName = "imagedir:" + filepath.Base(*dir)
+	} else {
+		switch {
+		case *mapping != "":
+			// EMNIST balanced/byclass/digits: 0-based labels; the mapping file
+			// gives the printable glyph per class.
+			labelSet, err = loadMapping(*mapping)
+			if err != nil {
+				return err
+			}
+			numClasses, transformLabel = len(labelSet), nil
+			datasetName = "emnist:" + filepath.Base(*mapping)
+		case *emnist:
+			// EMNIST letters: labels are 1..26; shift to 0..25.
+			transformLabel = func(l int) int { return l - 1 }
+			datasetName = "emnist-letters"
+		}
+		doTranspose := *emnist || *transpose || *mapping != ""
+		fmt.Printf("loading dataset %s / %s ...\n", *images, *labels)
+		ds, err = data.LoadIDX(*images, *labels, doTranspose, transformLabel)
+		if err != nil {
+			return err
+		}
 	}
 
-	fmt.Printf("loading dataset %s / %s ...\n", *images, *labels)
-	ds, err := data.LoadIDX(*images, *labels, *emnist, transformLabel)
-	if err != nil {
-		return err
-	}
 	rng := rand.New(rand.NewSource(*seed))
 	ds.Shuffle(rng)
 	ds = ds.Limit(*limit)
@@ -141,7 +176,7 @@ func cmdTrain(args []string) error {
 	}
 
 	acc := net.Evaluate(valInputs, valLabels)
-	m := &model.Model{Net: net, Labels: labelSet, Dataset: *alphabet, Accuracy: acc}
+	m := &model.Model{Net: net, Labels: labelSet, Dataset: datasetName, Accuracy: acc}
 	if err := m.Save(*out); err != nil {
 		return err
 	}
@@ -156,7 +191,8 @@ func cmdEval(args []string) error {
 	modelPath := fs.String("model", "model.gob", "model path")
 	images := fs.String("images", "", "IDX images file")
 	labels := fs.String("labels", "", "IDX labels file")
-	emnist := fs.Bool("emnist", false, "EMNIST geometry/labels")
+	emnist := fs.Bool("emnist", false, "EMNIST letters split (transpose + 1-indexed labels)")
+	transpose := fs.Bool("transpose", false, "transpose images (EMNIST balanced/byclass/digits)")
 	fs.Parse(args)
 
 	if *images == "" || *labels == "" {
@@ -170,7 +206,7 @@ func cmdEval(args []string) error {
 	if *emnist {
 		transform = func(l int) int { return l - 1 }
 	}
-	ds, err := data.LoadIDX(*images, *labels, *emnist, transform)
+	ds, err := data.LoadIDX(*images, *labels, *emnist || *transpose, transform)
 	if err != nil {
 		return err
 	}
@@ -225,6 +261,88 @@ func humanBytes(n int64) string {
 		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
 	default:
 		return fmt.Sprintf("%d B", n)
+	}
+}
+
+// --- export-glyphs ---
+
+// cmdExportGlyphs segments a real handwritten page into individual glyph images
+// (normalised exactly as the trainer expects) and writes them to a folder for a
+// human to label. This is step one of building a model on your own logs: run it
+// over real scans, sort the PNGs into class sub-folders, then `train -dir`.
+func cmdExportGlyphs(args []string) error {
+	fs := flag.NewFlagSet("export-glyphs", flag.ExitOnError)
+	imgPath := fs.String("image", "", "page/line image to segment (PNG/JPEG)")
+	outDir := fs.String("out", "glyphs", "directory to write glyph PNGs into")
+	singleLine := fs.Bool("line", false, "treat the image as one line (default: multi-line page)")
+	modelPath := fs.String("model", "", "optional model: also pre-label each glyph in its filename")
+	fs.Parse(args)
+
+	if *imgPath == "" {
+		return fmt.Errorf("export-glyphs: -image is required")
+	}
+	f, err := os.Open(*imgPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+		return err
+	}
+
+	// A model is optional here; when present we pre-label to speed up sorting.
+	var m *model.Model
+	if *modelPath != "" || hasEmbeddedModel() {
+		if mm, e := resolveModel(*modelPath); e == nil {
+			m = mm
+		}
+	}
+
+	var lines []segment.TextLine
+	if *singleLine {
+		lines = []segment.TextLine{{Glyphs: segment.Line(img, segment.DefaultParams())}}
+	} else {
+		lines = segment.Page(img, segment.DefaultPageParams())
+	}
+
+	base := strings.TrimSuffix(filepath.Base(*imgPath), filepath.Ext(*imgPath))
+	count := 0
+	for li, line := range lines {
+		for gi, g := range line.Glyphs {
+			if g.IsSpace {
+				continue
+			}
+			guess := ""
+			if m != nil {
+				class, _ := m.Net.Classify(g.Pixels)
+				guess = sanitizeLabel(m.Label(class)) + "_"
+			}
+			name := fmt.Sprintf("%s%s_l%02d_g%02d.png", guess, base, li, gi)
+			if err := imageprep.SavePNG(filepath.Join(*outDir, name), g.Pixels); err != nil {
+				return err
+			}
+			count++
+		}
+	}
+	fmt.Printf("wrote %d glyph images to %s/\n", count, *outDir)
+	if m != nil {
+		fmt.Println("filenames are prefixed with the model's guess — correct them by")
+		fmt.Println("moving each PNG into a sub-folder named for its true character.")
+	}
+	return nil
+}
+
+// sanitizeLabel makes a class glyph safe for a filename prefix.
+func sanitizeLabel(s string) string {
+	switch s {
+	case "/", "\\", ":", "*", "?", "\"", "<", ">", "|", " ", "":
+		return "x"
+	default:
+		return s
 	}
 }
 
@@ -289,7 +407,11 @@ func cmdRead(args []string) error {
 	if *multiline {
 		lines = segment.Page(img, segment.DefaultPageParams())
 	} else {
-		lines = []segment.TextLine{{Glyphs: segment.Line(img, segment.DefaultParams())}}
+		b := img.Bounds()
+		lines = []segment.TextLine{{
+			Glyphs: segment.Line(img, segment.DefaultParams()),
+			Y0:     0, Y1: b.Dy() - 1,
+		}}
 	}
 
 	result := transcribe(m, lines, *minConf, *verbose)
@@ -315,6 +437,7 @@ type readResult struct {
 	Text           string        `json:"text"`
 	Lines          []string      `json:"lines"`
 	Glyphs         [][]readGlyph `json:"glyphs"`
+	LineBounds     [][2]int      `json:"line_bounds"` // [y0,y1] per line, source pixels
 	MeanConfidence float64       `json:"mean_confidence"`
 }
 
@@ -346,6 +469,7 @@ func transcribe(m *model.Model, lines []segment.TextLine, minConf float64, verbo
 		}
 		res.Lines = append(res.Lines, sb.String())
 		res.Glyphs = append(res.Glyphs, lineGlyphs)
+		res.LineBounds = append(res.LineBounds, [2]int{line.Y0, line.Y1})
 	}
 	res.Text = strings.Join(res.Lines, "\n")
 	if confN > 0 {
@@ -371,6 +495,53 @@ func ranked(probs []float64, k int) []rankedClass {
 		rs = rs[:k]
 	}
 	return rs
+}
+
+// loadMapping reads an EMNIST "class_index ascii_code" mapping file into an
+// ordered label slice, so class i prints as the glyph mapping[i]. Classes are
+// expected to be 0-based and contiguous.
+func loadMapping(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	pairs := map[int]string{}
+	maxIdx := -1
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		var idx, code int
+		if _, err := fmt.Sscan(fields[0], &idx); err != nil {
+			continue
+		}
+		if _, err := fmt.Sscan(fields[1], &code); err != nil {
+			continue
+		}
+		pairs[idx] = string(rune(code))
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if maxIdx < 0 {
+		return nil, fmt.Errorf("mapping %s: no usable entries", path)
+	}
+	labels := make([]string, maxIdx+1)
+	for i := range labels {
+		if g, ok := pairs[i]; ok {
+			labels[i] = g
+		} else {
+			labels[i] = "?"
+		}
+	}
+	return labels, nil
 }
 
 func alphabetSpec(name string) (labels []string, numClasses int, transform func(int) int) {

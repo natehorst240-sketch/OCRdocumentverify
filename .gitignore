@@ -17,8 +17,9 @@ output/*
 !output/.gitkeep
 
 # Real records / runtime state (Docker bind-mounts and backups) — NEVER commit
+# NOTE: anchored to repo root so it does not swallow the Go handwriting/data/ package
 .env
-data/
+/data/
 backups/
 .session_lock.json
 

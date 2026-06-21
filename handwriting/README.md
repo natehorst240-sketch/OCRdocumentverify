@@ -36,9 +36,14 @@ imageprep/  scan → MNIST-style 28×28 normalised vector (grayscale, crop,
             scale-to-20px, centre-of-mass centring)
 segment/    split a line image into per-character glyphs (projection profile)
 model/      gob save/load, int8 quantization, label alphabet (digits / letters)
-cmd/handwriting/  CLI: train · eval · quantize · predict · read (+ embedded model)
-Makefile    build · test · quantize-embed · cross-compile · USB packaging
+cmd/handwriting/  CLI: train · eval · quantize · export-glyphs · predict · read
+Makefile    build · test · model-mnist/emnist · embed · cross-compile · USB · docker-train
 ```
+
+To train on **your own** handwritten logs (the way to real accuracy), see
+[`TRAINING.md`](TRAINING.md): `export-glyphs` cuts real scans into labelled
+glyphs, `train -dir` learns from the folders you sort them into, and
+`Dockerfile.train` does it all without a Go toolchain.
 
 ## Build
 
@@ -59,7 +64,16 @@ dates, hours, cycles, ATA codes. Reproduce or refresh it with:
 make model-mnist   # downloads MNIST, trains, evaluates, quantizes, embeds
 ```
 
-For **letters too** (full alphanumeric logbook text) train on EMNIST — see below.
+For **letters too** (full alphanumeric logbook text) train on EMNIST balanced
+(47 classes: digits + upper/lowercase letters) and embed that instead:
+
+```bash
+make model-emnist  # downloads EMNIST, trains a 47-class model, quantizes, embeds
+```
+
+EMNIST is harder than MNIST (47 visually-confusable classes), so expect lower
+per-character accuracy than the ~98% digit model — which is exactly why training
+on your own logs (`TRAINING.md`) matters for production use.
 
 ## Get a training set
 

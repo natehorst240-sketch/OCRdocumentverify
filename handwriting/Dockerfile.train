@@ -1,0 +1,37 @@
+# Training container for the handwriting recognizer.
+#
+# It builds the static Go binary and runs it against a mounted data volume, so
+# you can label and train on your own handwritten logs on any machine with
+# Docker — no Go toolchain, no Python, no GPU required. The same binary trains
+# and serves, so a model trained here drops straight into the app.
+#
+# Build:
+#   docker build -f Dockerfile.train -t handwriting-trainer .
+#
+# Label glyphs exported from real scans, then train on them:
+#   docker run --rm -v "$PWD/data:/data" handwriting-trainer \
+#     export-glyphs -image /data/scans/page1.png -out /data/unlabeled
+#   # (sort /data/unlabeled/*.png into /data/labeled/<char>/ by hand)
+#   docker run --rm -v "$PWD/data:/data" handwriting-trainer \
+#     train -dir /data/labeled -epochs 30 -out /data/model.gob
+#   docker run --rm -v "$PWD/data:/data" handwriting-trainer \
+#     quantize -in /data/model.gob -out /data/model.q8.gob
+#
+# Then embed /data/model.q8.gob with `make embed-model` and ship the binary.
+
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+# Cache modules first (none today, but future-proofs the build).
+COPY go.mod ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/handwriting ./cmd/handwriting
+
+FROM alpine:3.20
+RUN adduser -D -u 10001 trainer
+COPY --from=build /out/handwriting /usr/local/bin/handwriting
+USER trainer
+WORKDIR /data
+# All subcommands are available; default to help so a bare run is informative.
+ENTRYPOINT ["handwriting"]
+CMD ["help"]

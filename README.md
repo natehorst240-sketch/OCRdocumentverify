@@ -78,12 +78,22 @@ click-to-place component.
 ### Handwriting recognition (Go neural network)
 
 `handwriting/` is a self-contained, pure-Go neural network (standard library
-only) that recognises handwritten characters and reads whole handwritten
-logbook lines by segmenting them into glyphs. It is the local, dependency-free
-counterpart to the PaddleOCR printed-text stack — train it yourself on
-MNIST/EMNIST, ship it as a single static binary, and call it from the app for a
-fully offline handwriting pass on scanned field boxes. See
-[`handwriting/README.md`](handwriting/README.md) for build, training, and usage.
+only) that reads handwritten logbook scans — the one task PaddleOCR, tuned for
+printed text, handles poorly. It runs fully locally (no LLM, no Python ML stack)
+as a single static binary with a trained digit model embedded, and plugs into
+this app three ways:
+
+- **UI:** the **Read Handwritten Log** page uploads a scan, transcribes it, and
+  shows a per-character confidence overlay (green = confident, red = shaky).
+- **Pipeline:** set `HANDWRITING_OCR=1` and `ocr.ocr_image` routes handwriting
+  through the Go engine (via `handwriting_ocr.py`), falling back to PaddleOCR on
+  any error.
+- **Your own data:** `export-glyphs` + `train -dir` (and `Dockerfile.train`) let
+  you train the model on your real logs before publishing — see
+  [`handwriting/TRAINING.md`](handwriting/TRAINING.md).
+
+See [`handwriting/README.md`](handwriting/README.md) for build, training, and
+packaging (int8 quantization, embedded model, cross-compile, USB).
 
 ### Architecture note: how much actually needs the LLM?
 

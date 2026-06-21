@@ -12,7 +12,7 @@ LDFLAGS := -s -w   # strip symbol table + DWARF -> smaller binary
 GOFLAGS := -trimpath
 export CGO_ENABLED = 0
 
-.PHONY: all build test clean dist embed-model usb
+.PHONY: all build test clean dist embed-model usb model-mnist model-emnist docker-train
 
 ## build: compile for the host OS/arch
 build:
@@ -43,6 +43,34 @@ model-mnist: build
 	./$(BIN) eval -model .data/mnist.gob -images .data/t10k-images-idx3-ubyte.gz -labels .data/t10k-labels-idx1-ubyte.gz
 	./$(BIN) quantize -in .data/mnist.gob -out .data/mnist.q8.gob
 	$(MAKE) embed-model MODEL=.data/mnist.q8.gob
+
+EMNIST_URL := https://biometrics.nist.gov/cs_links/EMNIST/gzip.zip
+
+## model-emnist: download EMNIST, train an alphanumeric model (47 classes:
+## digits + letters), quantize, and embed it. Bigger/slower than MNIST.
+model-emnist: build
+	@mkdir -p .data/emnist
+	@test -f .data/emnist.zip || curl -fsSL -o .data/emnist.zip "$(EMNIST_URL)"
+	@cd .data/emnist && unzip -o -j ../emnist.zip \
+		"gzip/emnist-balanced-train-images-idx3-ubyte.gz" \
+		"gzip/emnist-balanced-train-labels-idx1-ubyte.gz" \
+		"gzip/emnist-balanced-test-images-idx3-ubyte.gz" \
+		"gzip/emnist-balanced-test-labels-idx1-ubyte.gz" \
+		"gzip/emnist-balanced-mapping.txt" >/dev/null
+	./$(BIN) train \
+		-images .data/emnist/emnist-balanced-train-images-idx3-ubyte.gz \
+		-labels .data/emnist/emnist-balanced-train-labels-idx1-ubyte.gz \
+		-mapping .data/emnist/emnist-balanced-mapping.txt \
+		-hidden 256 -epochs 20 -out .data/emnist.gob
+	./$(BIN) eval -model .data/emnist.gob -transpose \
+		-images .data/emnist/emnist-balanced-test-images-idx3-ubyte.gz \
+		-labels .data/emnist/emnist-balanced-test-labels-idx1-ubyte.gz
+	./$(BIN) quantize -in .data/emnist.gob -out .data/emnist.q8.gob
+	$(MAKE) embed-model MODEL=.data/emnist.q8.gob
+
+## docker-train: build the training container (no Go toolchain needed to use it)
+docker-train:
+	docker build -f Dockerfile.train -t handwriting-trainer .
 
 # Cross-compile matrix: GOOS/GOARCH pairs to ship.
 PLATFORMS := \
