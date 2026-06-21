@@ -30,6 +30,20 @@ embed-model:
 	$(MAKE) build
 	@echo "embedded $(MODEL) -> self-contained ./$(BIN)"
 
+MNIST_URL := https://storage.googleapis.com/cvdf-datasets/mnist
+
+## model-mnist: download MNIST, train a digit model, quantize, and embed it.
+## Reproduces the shipped cmd/handwriting/assets/default.gob (~98% test acc).
+model-mnist: build
+	@mkdir -p .data
+	@for f in train-images-idx3-ubyte train-labels-idx1-ubyte t10k-images-idx3-ubyte t10k-labels-idx1-ubyte; do \
+		test -f .data/$$f.gz || curl -fsSL -o .data/$$f.gz "$(MNIST_URL)/$$f.gz"; done
+	./$(BIN) train -images .data/train-images-idx3-ubyte.gz -labels .data/train-labels-idx1-ubyte.gz \
+		-alphabet digits -epochs 15 -hidden 128 -out .data/mnist.gob
+	./$(BIN) eval -model .data/mnist.gob -images .data/t10k-images-idx3-ubyte.gz -labels .data/t10k-labels-idx1-ubyte.gz
+	./$(BIN) quantize -in .data/mnist.gob -out .data/mnist.q8.gob
+	$(MAKE) embed-model MODEL=.data/mnist.q8.gob
+
 # Cross-compile matrix: GOOS/GOARCH pairs to ship.
 PLATFORMS := \
 	windows/amd64 \

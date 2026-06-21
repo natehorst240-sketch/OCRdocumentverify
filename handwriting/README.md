@@ -4,10 +4,14 @@ A self-contained, **pure-Go** (standard library only, no third-party packages)
 neural network that recognises handwritten characters and reads whole
 handwritten logbook lines by segmenting them into characters first.
 
-It is the local, dependency-free counterpart to the project's Python OCR stack
-(`ocr.py`, PaddleOCR): where PaddleOCR is a heavyweight printed-text engine, this
-module is a transparent, hackable handwriting model you can train yourself on
-aviation logbook / tech-log glyphs and ship as a single binary.
+**Why this exists:** the rest of the app (PDF/Excel parsing, compliance,
+templates) already works well; the one genuinely hard task is OCR of
+*handwritten* logs, which PaddleOCR — tuned for printed text — does poorly. This
+module is the dedicated handwriting engine for that one job. It plugs into the
+Python pipeline via `handwriting_ocr.py` (see **Integration** below), so
+handwritten scans are read by this trained neural net while everything else
+stays in Python. It ships as a single static binary — no LLM, no Python ML
+stack.
 
 The network is built from scratch — forward pass, cross-entropy loss, and
 backpropagation by hand — in the spirit of the well-known
@@ -44,12 +48,25 @@ go build ./cmd/handwriting     # produces ./handwriting
 go test ./...                  # XOR convergence, numeric-gradient check, etc.
 ```
 
+## A trained model ships in the box
+
+The binary already embeds a trained **digit** model — `make build` gives you a
+recognizer that reads 0–9 out of the box at **~98% MNIST test accuracy** (int8,
+~100 KB embedded). That covers a lot of real logbook content: tail numbers,
+dates, hours, cycles, ATA codes. Reproduce or refresh it with:
+
+```bash
+make model-mnist   # downloads MNIST, trains, evaluates, quantizes, embeds
+```
+
+For **letters too** (full alphanumeric logbook text) train on EMNIST — see below.
+
 ## Get a training set
 
 The model learns individual glyphs, so train it on a handwritten-character
 corpus in IDX format:
 
-- **MNIST** (digits 0–9) — http://yann.lecun.com/exdb/mnist/
+- **MNIST** (digits 0–9) — https://storage.googleapis.com/cvdf-datasets/mnist/
 - **EMNIST** (letters / balanced) — https://www.nist.gov/itl/products-and-services/emnist-dataset
 
 Download the image/label files (the loader reads the `.gz` directly).
@@ -193,9 +210,43 @@ This is an honest, working foundation, not a finished cursive-handwriting engine
 
 ## Integration with the Python app
 
-The CLI is the contract: the Streamlit/Python side can shell out to
-`handwriting read -model … -image …` for a fully local, no-Ollama handwriting
-pass on a scanned field box, and parse the transcribed line from stdout. Because
-the binary is static and dependency-free, it drops cleanly into the existing
-no-LLM / low-RAM deployment targets (e.g. the 8 GB N100) described in the root
-README.
+`handwriting_ocr.py` (in the repo root) is the bridge. It shells out to the
+binary's JSON `read` mode and returns text, exposing the same shape as the
+existing `ocr.py` helpers so it drops straight into the pipeline:
+
+```python
+import handwriting_ocr
+ok, msg = handwriting_ocr.is_available()
+text = handwriting_ocr.ocr_page("scan_of_handwritten_log.png")   # multi-line
+text = handwriting_ocr.ocr_image(cv2_box_crop)                   # one field box
+```
+
+`ocr.py` already calls it automatically: when `HANDWRITING_OCR=1` is set,
+`ocr.ocr_image` routes through the Go recognizer and **falls back to PaddleOCR**
+on any error, so a misconfigured engine never breaks a scan.
+
+Environment knobs:
+
+| Variable | Purpose |
+|---|---|
+| `HANDWRITING_OCR=1` | turn the Go engine on for handwriting |
+| `HANDWRITING_BIN`   | path to the binary (else auto-found under `handwriting/` or `$PATH`) |
+| `HANDWRITING_MODEL` | path to a trained model (else the model embedded in the binary) |
+
+The `read -json` output the bridge consumes looks like:
+
+```json
+{
+  "text": "N123AB 100HR INSP",
+  "lines": ["N123AB 100HR INSP"],
+  "glyphs": [[{"char": "N", "confidence": 0.97, "x0": 4, "x1": 21}, ...]],
+  "mean_confidence": 0.91
+}
+```
+
+`mean_confidence` and the per-glyph scores let the Python side flag a scan for
+human review instead of trusting a shaky reading — important when this feeds the
+conservative compliance engine.
+
+Because the binary is static and dependency-free, it fits the existing no-LLM /
+low-RAM deployment targets (e.g. the 8 GB N100) described in the root README.

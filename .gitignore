@@ -25,10 +25,13 @@ backups/
 # Go (handwriting neural net module)
 # built CLI binary
 handwriting/handwriting
-# cross-compiled distributables
+# cross-compiled distributables + training scratch
 handwriting/dist/
-# trained / embedded model files
+handwriting/.data/
+# trained model files
 *.gob
+# ...but DO ship the small int8 model embedded in the binary (works out of the box)
+!handwriting/cmd/handwriting/assets/default.gob
 # downloaded MNIST/EMNIST datasets
 *-idx*-ubyte*
 *.idx

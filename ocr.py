@@ -80,7 +80,22 @@ def preprocess_image(image_path: str | Path):
 
 
 def ocr_image(image) -> str:
-    """Run PaddleOCR on a preprocessed image and return joined text."""
+    """OCR a preprocessed image and return joined text.
+
+    For handwritten records the deployment can route OCR to the local Go neural
+    network (``HANDWRITING_OCR=1``), which reads handwriting better than the
+    print-tuned PaddleOCR engine. Any failure falls back to PaddleOCR so a
+    misconfigured handwriting engine never breaks the pipeline.
+    """
+    try:
+        import handwriting_ocr
+
+        if handwriting_ocr.enabled():
+            return handwriting_ocr.ocr_image(image)
+    except Exception:
+        # Fall through to PaddleOCR — the handwriting engine is best-effort.
+        pass
+
     result = _get_engine().ocr(image, cls=True)
     lines: list[str] = []
     # PaddleOCR returns [[ [box, (text, score)], ... ]] per image.

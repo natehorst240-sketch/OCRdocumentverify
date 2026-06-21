@@ -4,15 +4,17 @@
 //
 // Subcommands:
 //
-//	train    train a model on an MNIST/EMNIST IDX dataset and save it
-//	eval     report accuracy of a saved model on a test set
-//	predict  classify a single glyph image (PNG/JPEG)
-//	read     segment a line image and transcribe it to text
+//	train     train a model on an MNIST/EMNIST IDX dataset and save it
+//	eval      report accuracy of a saved model on a test set
+//	quantize  shrink a trained model to int8 for embedding/shipping
+//	predict   classify a single glyph image (PNG/JPEG)
+//	read      transcribe a line (or a page with -multiline) to text/JSON
 //
 // Run a subcommand with -h to see its flags.
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
@@ -258,9 +260,11 @@ func cmdPredict(args []string) error {
 func cmdRead(args []string) error {
 	fs := flag.NewFlagSet("read", flag.ExitOnError)
 	modelPath := fs.String("model", "", "model path (optional if a model is embedded)")
-	imgPath := fs.String("image", "", "line image (PNG/JPEG)")
+	imgPath := fs.String("image", "", "image (PNG/JPEG): one line, or a page with -multiline")
 	minConf := fs.Float64("minconf", 0.0, "mark glyphs below this confidence with '·'")
-	verbose := fs.Bool("v", false, "print per-glyph confidence")
+	multiline := fs.Bool("multiline", false, "segment the image into multiple text lines first")
+	asJSON := fs.Bool("json", false, "emit structured JSON (text + per-glyph confidence)")
+	verbose := fs.Bool("v", false, "print per-glyph confidence to stderr")
 	fs.Parse(args)
 
 	if *imgPath == "" {
@@ -280,25 +284,74 @@ func cmdRead(args []string) error {
 		return err
 	}
 
-	glyphs := segment.Line(img, segment.DefaultParams())
-	var sb strings.Builder
-	for _, g := range glyphs {
-		if g.IsSpace {
-			sb.WriteByte(' ')
-			continue
-		}
-		class, prob := m.Net.Classify(g.Pixels)
-		ch := m.Label(class)
-		if prob < *minConf {
-			ch = "·"
-		}
-		sb.WriteString(ch)
-		if *verbose {
-			fmt.Printf("  cols %3d-%-3d  %-2s  %.3f\n", g.X0, g.X1, m.Label(class), prob)
-		}
+	// Normalise to a list of lines so single-line and page modes share one path.
+	var lines []segment.TextLine
+	if *multiline {
+		lines = segment.Page(img, segment.DefaultPageParams())
+	} else {
+		lines = []segment.TextLine{{Glyphs: segment.Line(img, segment.DefaultParams())}}
 	}
-	fmt.Println(sb.String())
+
+	result := transcribe(m, lines, *minConf, *verbose)
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+	fmt.Println(result.Text)
 	return nil
+}
+
+// readGlyph is one recognised character with its confidence and source span.
+type readGlyph struct {
+	Char       string  `json:"char"`
+	Confidence float64 `json:"confidence"`
+	X0         int     `json:"x0"`
+	X1         int     `json:"x1"`
+}
+
+// readResult is the structured transcription of an image.
+type readResult struct {
+	Text           string        `json:"text"`
+	Lines          []string      `json:"lines"`
+	Glyphs         [][]readGlyph `json:"glyphs"`
+	MeanConfidence float64       `json:"mean_confidence"`
+}
+
+// transcribe classifies every glyph in every line and assembles the result.
+func transcribe(m *model.Model, lines []segment.TextLine, minConf float64, verbose bool) readResult {
+	var res readResult
+	var confSum float64
+	var confN int
+	for li, line := range lines {
+		var sb strings.Builder
+		var lineGlyphs []readGlyph
+		for _, g := range line.Glyphs {
+			if g.IsSpace {
+				sb.WriteByte(' ')
+				continue
+			}
+			class, prob := m.Net.Classify(g.Pixels)
+			ch := m.Label(class)
+			confSum += prob
+			confN++
+			if prob < minConf {
+				ch = "·"
+			}
+			sb.WriteString(ch)
+			lineGlyphs = append(lineGlyphs, readGlyph{Char: m.Label(class), Confidence: prob, X0: g.X0, X1: g.X1})
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  line %d  cols %3d-%-3d  %-2s  %.3f\n", li, g.X0, g.X1, m.Label(class), prob)
+			}
+		}
+		res.Lines = append(res.Lines, sb.String())
+		res.Glyphs = append(res.Glyphs, lineGlyphs)
+	}
+	res.Text = strings.Join(res.Lines, "\n")
+	if confN > 0 {
+		res.MeanConfidence = confSum / float64(confN)
+	}
+	return res
 }
 
 // --- helpers ---
