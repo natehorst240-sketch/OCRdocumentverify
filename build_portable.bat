@@ -41,11 +41,11 @@ echo The portable app is ready in this folder.
 echo Next: zip this whole folder and share it. The recipient double-clicks run.bat.
 echo (Tip: delete the .venv and __pycache__ folders before zipping to keep it small.)
 echo.
-pause
+if not defined CI pause
 exit /b 0
 
 :fail
 echo.
 echo BUILD FAILED. Check your internet connection and try again.
-pause
+if not defined CI pause
 exit /b 1

@@ -48,11 +48,11 @@ echo === Done. ===
 echo The installer is in:  dist_installer\
 echo Share that setup.exe - recipients double-click it to install.
 echo.
-pause
+if not defined CI pause
 exit /b 0
 
 :fail
 echo.
 echo BUILD FAILED. See the message above.
-pause
+if not defined CI pause
 exit /b 1

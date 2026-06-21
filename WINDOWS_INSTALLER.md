@@ -15,6 +15,27 @@ else to install.
 - Launching it opens the app in their browser at `http://localhost:8501`,
   running locally in no-LLM mode with the Go handwriting engine enabled.
 
+## Easiest: build it in the cloud (no Windows machine needed)
+
+A GitHub Action builds the installer on a Windows runner for you:
+
+1. Push this branch to GitHub.
+2. Open the repo's **Actions** tab → **Build Windows installer** → **Run
+   workflow**.
+3. When it finishes (~5–10 min), download the **AviationRecordsProcessor-Setup**
+   artifact from the run's summary page — that's your `setup.exe`.
+
+Tagging a release also triggers it and attaches the installer to the GitHub
+release:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+The workflow (`.github/workflows/windows-installer.yml`) sets up Go, installs
+Inno Setup, builds the Python runtime + engine, and runs the same
+`build_installer.bat` you'd run locally.
+
 ## Build it once (on a Windows machine with internet)
 
 You need two tools on the **build** machine (not the end user's):
