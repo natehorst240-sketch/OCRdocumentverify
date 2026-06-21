@@ -28,9 +28,10 @@ jobs:
 
       - name: Build the Go handwriting engine (handwriting.exe)
         shell: pwsh
+        working-directory: handwriting   # the Go module lives here
         env:
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags "-s -w" -o handwriting.exe ./handwriting/cmd/handwriting
+        run: go build -trimpath -ldflags "-s -w" -o ../handwriting.exe ./cmd/handwriting
 
       - name: Install Inno Setup (provides ISCC.exe)
         shell: pwsh

@@ -32,7 +32,11 @@ if exist "handwriting.exe" (
     echo     into this folder, then re-run. Continuing without it for now...
   ) else (
     set "CGO_ENABLED=0"
-    go build -trimpath -ldflags "-s -w" -o handwriting.exe .\handwriting\cmd\handwriting || goto :fail
+    REM The Go module lives under handwriting\, so build from there and write
+    REM the exe back to the repo root (the installer picks it up from here).
+    pushd handwriting
+    go build -trimpath -ldflags "-s -w" -o ..\handwriting.exe .\cmd\handwriting || (popd & goto :fail)
+    popd
     echo     built handwriting.exe
   )
 )

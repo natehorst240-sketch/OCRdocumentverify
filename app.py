@@ -5,6 +5,7 @@ Sprint 2: ingestion + OCR for scanned records, AD/ASB/ICA requirement PDFs,
           and Veryon Excel exports.
 """
 
+import hashlib
 import uuid
 from pathlib import Path
 
@@ -845,13 +846,16 @@ def page_read_handwriting() -> None:
         help="Characters the model reads below this confidence are flagged for "
              "you to decide. Raise it to be more cautious.")
 
+    # Only PNG/JPEG — the Go recognizer decodes exactly those (no tiff/bmp).
     uploaded = st.file_uploader(
-        "Upload a handwritten scan",
-        type=["png", "jpg", "jpeg", "tif", "tiff", "bmp"])
+        "Upload a handwritten scan", type=["png", "jpg", "jpeg"])
     if not uploaded:
         return
 
     path = save_upload(uploaded, subdir="handwriting")
+    # Tie widget state to this specific image so a later upload doesn't inherit
+    # the previous scan's edited text.
+    file_key = hashlib.md5(path.read_bytes()).hexdigest()[:12]
     with st.spinner("Recognizing…"):
         try:
             # min_conf marks flagged chars with '·' in the read-only text view.
@@ -895,7 +899,8 @@ def page_read_handwriting() -> None:
     st.subheader("Correct & accept")
     corrected = st.text_area(
         "Edit the transcription, fixing any flagged characters:",
-        value=result.get("text", ""), height=160, key="hw_corrected")
+        value=result.get("text", ""), height=160,
+        key=f"hw_corrected_{file_key}")
 
     a1, a2 = st.columns(2)
     if a1.button("✅ Accept transcription", type="primary"):
