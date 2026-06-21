@@ -22,6 +22,11 @@ data/
 backups/
 .session_lock.json
 
+# Go (handwriting neural net module)
+handwriting/handwriting        # built CLI binary
+*.gob                          # trained model files
+*-idx*-ubyte*                  # downloaded MNIST/EMNIST datasets
+
 # OS / editor
 .DS_Store
 .idea/

@@ -75,6 +75,16 @@ click-to-place component.
   no-LLM N100). Gap Analysis shows the Applies/Review/N-A counts and hides
   not-applicable items by default.
 
+### Handwriting recognition (Go neural network)
+
+`handwriting/` is a self-contained, pure-Go neural network (standard library
+only) that recognises handwritten characters and reads whole handwritten
+logbook lines by segmenting them into glyphs. It is the local, dependency-free
+counterpart to the PaddleOCR printed-text stack — train it yourself on
+MNIST/EMNIST, ship it as a single static binary, and call it from the app for a
+fully offline handwriting pass on scanned field boxes. See
+[`handwriting/README.md`](handwriting/README.md) for build, training, and usage.
+
 ### Architecture note: how much actually needs the LLM?
 
 Most of the pipeline is a deterministic Python engine — OCR (PaddleOCR), PDF
