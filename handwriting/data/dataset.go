@@ -1,6 +1,23 @@
 package data
 
-import "math/rand"
+import (
+	"math/rand"
+
+	"github.com/natehorst240-sketch/ocrdocumentverify/handwriting/imageprep"
+)
+
+// Renormalize re-runs every sample through the same imageprep normalisation the
+// recognizer applies to real images, so the training distribution matches what
+// the model sees at inference. This is essential for datasets like EMNIST whose
+// native framing differs from imageprep's MNIST-style 20px-in-28px centring;
+// without it a model scores well on the raw test set but poorly on real scans.
+func (d *Dataset) Renormalize() {
+	for i := range d.Samples {
+		g := &imageprep.Grid{W: d.Cols, H: d.Rows, Data: d.Samples[i].Pixels}
+		d.Samples[i].Pixels = g.Normalize()
+	}
+	d.Rows, d.Cols = imageprep.Side, imageprep.Side
+}
 
 // Inputs returns the pixel vectors as a slice ready for nn.Network.Train.
 func (d *Dataset) Inputs() [][]float64 {

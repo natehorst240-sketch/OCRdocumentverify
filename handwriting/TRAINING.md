@@ -60,6 +60,17 @@ Tips:
 - Combine your data with a public set (copy EMNIST-derived glyphs into the same
   folders) if you're short on examples for some characters.
 
+### Train/inference parity (`-normalize`)
+
+`train` defaults to `-normalize`, which runs IDX datasets (MNIST/EMNIST) through
+the **same** image normalisation the recognizer applies to real scans. This
+matters: a model trained on a dataset's *native* framing can score ~80% on that
+dataset's test set yet only ~60% on real images, because the glyphs are centred
+and scaled differently. Normalising at train time closes that gap (measured
++16 points on EMNIST through the image pipeline). Glyph-folder training (`-dir`)
+is already in this frame — `export-glyphs` produces normalised crops — so no
+flag is needed there.
+
 ## 4. Quantize, embed, ship
 
 ```bash

@@ -101,6 +101,7 @@ func cmdTrain(args []string) error {
 	val := fs.Float64("val", 0.1, "fraction of data held out for validation")
 	emnist := fs.Bool("emnist", false, "EMNIST letters split (transpose + 1-indexed labels)")
 	transpose := fs.Bool("transpose", false, "transpose images (all EMNIST splits store them rotated)")
+	normalize := fs.Bool("normalize", true, "re-normalize IDX glyphs through imageprep so training matches inference framing")
 	seed := fs.Int64("seed", 1, "random seed")
 	fs.Parse(args)
 
@@ -143,6 +144,11 @@ func cmdTrain(args []string) error {
 		ds, err = data.LoadIDX(*images, *labels, doTranspose, transformLabel)
 		if err != nil {
 			return err
+		}
+		if *normalize {
+			// Match the inference front-end so the model works on real scans,
+			// not just the dataset's own framing (critical for EMNIST).
+			ds.Renormalize()
 		}
 	}
 
@@ -193,6 +199,7 @@ func cmdEval(args []string) error {
 	labels := fs.String("labels", "", "IDX labels file")
 	emnist := fs.Bool("emnist", false, "EMNIST letters split (transpose + 1-indexed labels)")
 	transpose := fs.Bool("transpose", false, "transpose images (EMNIST balanced/byclass/digits)")
+	normalize := fs.Bool("normalize", false, "re-normalize through imageprep (match a model trained with -normalize)")
 	fs.Parse(args)
 
 	if *images == "" || *labels == "" {
@@ -209,6 +216,9 @@ func cmdEval(args []string) error {
 	ds, err := data.LoadIDX(*images, *labels, *emnist || *transpose, transform)
 	if err != nil {
 		return err
+	}
+	if *normalize {
+		ds.Renormalize()
 	}
 	acc := m.Net.Evaluate(ds.Inputs(), ds.Labels())
 	fmt.Printf("model %s  dataset %s  test-acc %.4f over %d samples\n",

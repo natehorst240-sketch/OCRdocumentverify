@@ -40,7 +40,7 @@ model-mnist: build
 		test -f .data/$$f.gz || curl -fsSL -o .data/$$f.gz "$(MNIST_URL)/$$f.gz"; done
 	./$(BIN) train -images .data/train-images-idx3-ubyte.gz -labels .data/train-labels-idx1-ubyte.gz \
 		-alphabet digits -epochs 15 -hidden 128 -out .data/mnist.gob
-	./$(BIN) eval -model .data/mnist.gob -images .data/t10k-images-idx3-ubyte.gz -labels .data/t10k-labels-idx1-ubyte.gz
+	./$(BIN) eval -model .data/mnist.gob -normalize -images .data/t10k-images-idx3-ubyte.gz -labels .data/t10k-labels-idx1-ubyte.gz
 	./$(BIN) quantize -in .data/mnist.gob -out .data/mnist.q8.gob
 	$(MAKE) embed-model MODEL=.data/mnist.q8.gob
 
@@ -62,7 +62,7 @@ model-emnist: build
 		-labels .data/emnist/emnist-balanced-train-labels-idx1-ubyte.gz \
 		-mapping .data/emnist/emnist-balanced-mapping.txt \
 		-hidden 256 -epochs 20 -out .data/emnist.gob
-	./$(BIN) eval -model .data/emnist.gob -transpose \
+	./$(BIN) eval -model .data/emnist.gob -transpose -normalize \
 		-images .data/emnist/emnist-balanced-test-images-idx3-ubyte.gz \
 		-labels .data/emnist/emnist-balanced-test-labels-idx1-ubyte.gz
 	./$(BIN) quantize -in .data/emnist.gob -out .data/emnist.q8.gob
