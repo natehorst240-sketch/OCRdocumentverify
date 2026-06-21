@@ -89,9 +89,10 @@ func segmentGrid(g *imageprep.Grid, p Params) []Glyph {
 		if end-start+1 < p.MinWidth {
 			continue // speck / noise
 		}
-		// emit a space if the gap before this glyph was word-sized
-		if prevEnd >= 0 && start-prevEnd >= p.SpaceGap {
-			glyphs = append(glyphs, Glyph{IsSpace: true, X0: prevEnd, X1: start})
+		// emit a space when the blank columns between glyphs are word-sized.
+		// The gap is the columns strictly between prevEnd and start.
+		if prevEnd >= 0 && start-prevEnd-1 >= p.SpaceGap {
+			glyphs = append(glyphs, Glyph{IsSpace: true, X0: prevEnd + 1, X1: start - 1})
 		}
 		glyphs = append(glyphs, Glyph{
 			Pixels: cropNormalize(g, start, end),

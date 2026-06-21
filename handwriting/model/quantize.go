@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/natehorst240-sketch/ocrdocumentverify/handwriting/nn"
@@ -67,11 +68,23 @@ func quantizeMatrix(w *nn.Matrix) ([]int8, float64) {
 	return out, scale
 }
 
-// materialize rebuilds float weight matrices from the int8 payload back into net.
-func (q *Quantization) materialize(net *nn.Network) {
+// materialize rebuilds float weight matrices from the int8 payload back into
+// net. It validates the payload first so a corrupt/malicious model file returns
+// an error instead of panicking on a bad index or allocation.
+func (q *Quantization) materialize(net *nn.Network) error {
+	if net == nil {
+		return fmt.Errorf("model: nil network for quantized weights")
+	}
+	if len(q.Shapes) != len(q.QData) || len(q.Scales) != len(q.QData) {
+		return fmt.Errorf("model: quant payload mismatch (%d shapes, %d data, %d scales)",
+			len(q.Shapes), len(q.QData), len(q.Scales))
+	}
 	net.Weights = make([]*nn.Matrix, len(q.QData))
 	for l, codes := range q.QData {
 		rows, cols := q.Shapes[l][0], q.Shapes[l][1]
+		if rows <= 0 || cols <= 0 || len(codes) != rows*cols {
+			return fmt.Errorf("model: quant layer %d invalid (%dx%d, %d codes)", l, rows, cols, len(codes))
+		}
 		w := nn.NewMatrix(rows, cols)
 		scale := q.Scales[l]
 		for i, c := range codes {
@@ -79,4 +92,5 @@ func (q *Quantization) materialize(net *nn.Network) {
 		}
 		net.Weights[l] = w
 	}
+	return nil
 }

@@ -136,7 +136,19 @@ func (n *Network) Train(cfg Config, inputs [][]float64, targets [][]float64, onE
 	if len(inputs) == 0 {
 		return fmt.Errorf("nn: no training samples")
 	}
+	if cfg.BatchSize <= 0 {
+		return fmt.Errorf("nn: batch size must be > 0 (got %d)", cfg.BatchSize)
+	}
 	numClasses := n.Layers[len(n.Layers)-1]
+	inDim := n.Layers[0]
+	for i := range inputs {
+		if len(inputs[i]) != inDim {
+			return fmt.Errorf("nn: input[%d] has len %d, want %d", i, len(inputs[i]), inDim)
+		}
+		if len(targets[i]) != numClasses {
+			return fmt.Errorf("nn: target[%d] has len %d, want %d", i, len(targets[i]), numClasses)
+		}
+	}
 	rng := rand.New(rand.NewSource(cfg.Seed))
 
 	// fresh momentum buffers

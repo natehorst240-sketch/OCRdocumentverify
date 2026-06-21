@@ -72,14 +72,21 @@ func (m *Model) Save(path string) error {
 	return m.Write(f)
 }
 
+// maxModelBytes caps how much a model file can decode into, so a corrupt or
+// malicious gob payload can't exhaust memory (encoding/gob is not hardened
+// against untrusted input). Real models are well under a megabyte.
+const maxModelBytes = 64 << 20
+
 // Read decodes a model from r, reconstructing float weights if it was quantised.
 func Read(r io.Reader) (*Model, error) {
 	var m Model
-	if err := gob.NewDecoder(r).Decode(&m); err != nil {
+	if err := gob.NewDecoder(io.LimitReader(r, maxModelBytes)).Decode(&m); err != nil {
 		return nil, fmt.Errorf("model: decode: %w", err)
 	}
 	if m.Quant != nil {
-		m.Quant.materialize(m.Net)
+		if err := m.Quant.materialize(m.Net); err != nil {
+			return nil, err
+		}
 	}
 	return &m, nil
 }

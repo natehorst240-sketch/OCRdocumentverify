@@ -27,6 +27,10 @@ func TestRenormalizeProducesInferenceFraming(t *testing.T) {
 	if ds.Rows != imageprep.Side || ds.Cols != imageprep.Side {
 		t.Fatalf("geometry = %dx%d, want %dx%d", ds.Rows, ds.Cols, imageprep.Side, imageprep.Side)
 	}
+	if ds.Samples[0].Rows != imageprep.Side || ds.Samples[0].Cols != imageprep.Side {
+		t.Fatalf("per-sample geometry = %dx%d, want %dx%d",
+			ds.Samples[0].Rows, ds.Samples[0].Cols, imageprep.Side, imageprep.Side)
+	}
 	got := ds.Samples[0].Pixels
 	if len(got) != imageprep.Side*imageprep.Side {
 		t.Fatalf("vector len = %d, want %d", len(got), imageprep.Side*imageprep.Side)

@@ -40,3 +40,37 @@ func TestSegmentCountsGlyphsAndSpace(t *testing.T) {
 		t.Fatalf("got %d spaces, want 1", spaces)
 	}
 }
+
+// TestSpaceGapBoundary locks the exact threshold: a gap of SpaceGap blank
+// columns emits a space, but SpaceGap-1 does not.
+func TestSpaceGapBoundary(t *testing.T) {
+	p := DefaultParams()
+	// Build two glyphs separated by exactly `gap` blank columns and count spaces.
+	spacesFor := func(gap int) int {
+		w, h := 40+gap, 20
+		g := &imageprep.Grid{W: w, H: h, Data: make([]float64, w*h)}
+		fill := func(x0, x1 int) {
+			for y := 4; y < 16; y++ {
+				for x := x0; x <= x1; x++ {
+					g.Data[y*w+x] = 1
+				}
+			}
+		}
+		fill(2, 6)          // glyph A ends at col 6
+		fill(7+gap, 11+gap) // glyph B starts after `gap` blank columns
+		spaces := 0
+		for _, gl := range segmentGrid(g, p) {
+			if gl.IsSpace {
+				spaces++
+			}
+		}
+		return spaces
+	}
+
+	if s := spacesFor(p.SpaceGap - 1); s != 0 {
+		t.Fatalf("gap SpaceGap-1 (%d): got %d spaces, want 0", p.SpaceGap-1, s)
+	}
+	if s := spacesFor(p.SpaceGap); s != 1 {
+		t.Fatalf("gap SpaceGap (%d): got %d spaces, want 1", p.SpaceGap, s)
+	}
+}

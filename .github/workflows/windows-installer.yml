@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
+        with:
+          # Don't leave the GITHUB_TOKEN in .git/config on the runner.
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5

@@ -306,9 +306,17 @@ func cmdExportGlyphs(args []string) error {
 	}
 
 	// A model is optional here; when present we pre-label to speed up sorting.
+	// An explicit -model that fails to load is a hard error (don't silently
+	// produce unlabelled glyphs); a missing embedded model just means no guess.
 	var m *model.Model
-	if *modelPath != "" || hasEmbeddedModel() {
-		if mm, e := resolveModel(*modelPath); e == nil {
+	if *modelPath != "" {
+		mm, e := resolveModel(*modelPath)
+		if e != nil {
+			return fmt.Errorf("export-glyphs: cannot load -model %q: %w", *modelPath, e)
+		}
+		m = mm
+	} else if hasEmbeddedModel() {
+		if mm, e := resolveModel(""); e == nil {
 			m = mm
 		}
 	}

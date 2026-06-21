@@ -129,7 +129,13 @@ def ocr_boxes(image_path: str | Path, boxes: list[dict]) -> list[dict]:
             else:
                 text = ocr.ocr_image(crop).strip()
         except Exception:
-            text = ""
+            # If the handwriting engine fails on a box, recover the text with
+            # the default OCR rather than silently dropping the field.
+            try:
+                text = ocr.ocr_image(crop).strip()
+                confidence = None
+            except Exception:
+                text = ""
         enriched.append({**box, "text": text, "confidence": confidence})
     return enriched
 

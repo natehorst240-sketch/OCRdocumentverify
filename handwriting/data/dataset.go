@@ -15,6 +15,8 @@ func (d *Dataset) Renormalize() {
 	for i := range d.Samples {
 		g := &imageprep.Grid{W: d.Cols, H: d.Rows, Data: d.Samples[i].Pixels}
 		d.Samples[i].Pixels = g.Normalize()
+		d.Samples[i].Rows = imageprep.Side
+		d.Samples[i].Cols = imageprep.Side
 	}
 	d.Rows, d.Cols = imageprep.Side, imageprep.Side
 }
@@ -60,6 +62,13 @@ func (d *Dataset) Shuffle(rng *rand.Rand) {
 // Split returns the first frac of the samples and the remainder, useful for
 // carving a quick validation set out of the training data.
 func (d *Dataset) Split(frac float64) (*Dataset, *Dataset) {
+	// Clamp to [0,1] so an out-of-range fraction can't produce invalid slice
+	// bounds and panic.
+	if frac < 0 {
+		frac = 0
+	} else if frac > 1 {
+		frac = 1
+	}
 	cut := int(float64(len(d.Samples)) * frac)
 	a := &Dataset{Rows: d.Rows, Cols: d.Cols, Samples: d.Samples[:cut]}
 	b := &Dataset{Rows: d.Rows, Cols: d.Cols, Samples: d.Samples[cut:]}

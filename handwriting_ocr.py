@@ -32,7 +32,18 @@ _ENV_BIN = "HANDWRITING_BIN"
 _ENV_MODEL = "HANDWRITING_MODEL"
 _ENV_ENABLE = "HANDWRITING_OCR"
 
-_DEFAULT_TIMEOUT = int(os.environ.get("HANDWRITING_TIMEOUT", "60"))
+def _env_int(name: str, default: int) -> int:
+    """Parse a positive integer env var, falling back to ``default`` rather than
+    crashing module import on a malformed value."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_DEFAULT_TIMEOUT = _env_int("HANDWRITING_TIMEOUT", 60)
 
 
 class HandwritingOCRError(RuntimeError):
@@ -77,9 +88,13 @@ def is_available(timeout: int = 5) -> tuple[bool, str]:
         )
     try:
         # `help` exits cleanly and proves the binary runs on this platform.
-        subprocess.run([binary, "help"], capture_output=True, timeout=timeout)
+        proc = subprocess.run(
+            [binary, "help"], capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"Go handwriting binary failed to run: {exc}"
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "non-zero exit"
+        return False, f"Go handwriting binary failed health check: {detail}"
     return True, f"Go handwriting recognizer ready ({binary})."
 
 

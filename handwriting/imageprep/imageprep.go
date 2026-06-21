@@ -59,10 +59,16 @@ func FromImage(img image.Image) *Grid {
 	var sum float64
 	for y := 0; y < g.H; y++ {
 		for x := 0; x < g.W; x++ {
-			r, gr, bl, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-			// luminance in [0,1]; 1 == white paper, 0 == black ink
-			lum := (0.299*float64(r) + 0.587*float64(gr) + 0.114*float64(bl)) / 65535.0
-			ink := 1 - lum // ink-positive
+			r, gr, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			// RGBA() returns alpha-premultiplied channels. Composite over white
+			// paper so a transparent background reads as blank, not as ink:
+			// luminance = premultiplied luminance + (1 - alpha).
+			lum := (0.299*float64(r)+0.587*float64(gr)+0.114*float64(bl))/65535.0 +
+				(1 - float64(a)/65535.0)
+			if lum > 1 {
+				lum = 1 // clamp for float rounding
+			}
+			ink := 1 - lum // ink-positive (1 == ink, 0 == white paper)
 			g.Data[y*g.W+x] = ink
 			sum += ink
 		}
