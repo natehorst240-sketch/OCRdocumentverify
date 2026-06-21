@@ -286,6 +286,7 @@ func cmdExportGlyphs(args []string) error {
 	outDir := fs.String("out", "glyphs", "directory to write glyph PNGs into")
 	singleLine := fs.Bool("line", false, "treat the image as one line (default: multi-line page)")
 	modelPath := fs.String("model", "", "optional model: also pre-label each glyph in its filename")
+	maxConf := fs.Float64("maxconf", 0, "only export glyphs the model reads below this confidence (0 = all); great for capturing just the uncertain ones to review/retrain")
 	fs.Parse(args)
 
 	if *imgPath == "" {
@@ -319,6 +320,10 @@ func cmdExportGlyphs(args []string) error {
 		lines = segment.Page(img, segment.DefaultPageParams())
 	}
 
+	if *maxConf > 0 && m == nil {
+		return fmt.Errorf("export-glyphs: -maxconf needs a model (none given or embedded)")
+	}
+
 	base := strings.TrimSuffix(filepath.Base(*imgPath), filepath.Ext(*imgPath))
 	count := 0
 	for li, line := range lines {
@@ -328,7 +333,10 @@ func cmdExportGlyphs(args []string) error {
 			}
 			guess := ""
 			if m != nil {
-				class, _ := m.Net.Classify(g.Pixels)
+				class, prob := m.Net.Classify(g.Pixels)
+				if *maxConf > 0 && prob >= *maxConf {
+					continue // confident enough — skip; we only want the doubtful ones
+				}
 				guess = sanitizeLabel(m.Label(class)) + "_"
 			}
 			name := fmt.Sprintf("%s%s_l%02d_g%02d.png", guess, base, li, gi)
@@ -338,7 +346,11 @@ func cmdExportGlyphs(args []string) error {
 			count++
 		}
 	}
-	fmt.Printf("wrote %d glyph images to %s/\n", count, *outDir)
+	if *maxConf > 0 {
+		fmt.Printf("wrote %d glyph images (confidence < %.2f) to %s/\n", count, *maxConf, *outDir)
+	} else {
+		fmt.Printf("wrote %d glyph images to %s/\n", count, *outDir)
+	}
 	if m != nil {
 		fmt.Println("filenames are prefixed with the model's guess — correct them by")
 		fmt.Println("moving each PNG into a sub-folder named for its true character.")

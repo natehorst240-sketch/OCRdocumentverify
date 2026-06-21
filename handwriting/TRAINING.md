@@ -27,6 +27,18 @@ handwriting export-glyphs -image scans/logbook_page1.png -out unlabeled/
 
 `-line` treats the image as a single line; the default is a multi-line page.
 
+**Capture just the hard ones.** Add `-maxconf 0.6` to export *only* the glyphs
+the model read below that confidence — the characters it wasn't sure about.
+This is the most efficient data to label: it targets exactly the model's blind
+spots. It's also what the app's **Read Handwritten Log** page does when you
+click *Save flagged glyphs for retraining*, so review and training share one
+loop — a human deciphers the uncertain characters, and those same glyphs become
+the next round of training data.
+
+```bash
+handwriting export-glyphs -image scans/page1.png -out unlabeled/ -maxconf 0.6
+```
+
 ## 2. Label them
 
 Sort the PNGs in `unlabeled/` into one sub-folder per character. The folder name

@@ -153,6 +153,41 @@ def ocr_page(image_path: str) -> str:
     return read_text(image_path, multiline=True)
 
 
+def export_uncertain_glyphs(image_path: str, out_dir: str,
+                            max_conf: float = 0.6,
+                            multiline: bool = True) -> int:
+    """Write the glyphs the model reads *below* ``max_conf`` to ``out_dir`` as
+    PNGs (pre-labelled with the model's guess), for a human to correct and feed
+    back into training. Returns the number of glyphs written.
+
+    This is the capture half of the review loop: the characters the recognizer
+    wasn't sure about become labelled training data once a human fixes them.
+    """
+    binary = _binary_path()
+    if not binary:
+        raise HandwritingOCRError("Go handwriting binary not found")
+    cmd = [binary, "export-glyphs", "-image", str(image_path),
+           "-out", str(out_dir), "-maxconf", str(max_conf)]
+    if not multiline:
+        cmd.append("-line")
+    model = os.environ.get(_ENV_MODEL)
+    if model:
+        cmd += ["-model", model]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=_DEFAULT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HandwritingOCRError(f"export-glyphs failed to run: {exc}") from exc
+    if proc.returncode != 0:
+        raise HandwritingOCRError(
+            f"export-glyphs error: {proc.stderr.strip() or 'unknown error'}")
+    # stdout: "wrote N glyph images ..." — pull the count back out.
+    for token in proc.stdout.split():
+        if token.isdigit():
+            return int(token)
+    return 0
+
+
 if __name__ == "__main__":
     import sys
 
