@@ -80,7 +80,7 @@ click-to-place component.
 `handwriting/` is a self-contained, pure-Go neural network (standard library
 only) that reads handwritten logbook scans — the one task PaddleOCR, tuned for
 printed text, handles poorly. It runs fully locally (no LLM, no Python ML stack)
-as a single static binary with a trained digit model embedded, and plugs into
+as a single static binary with a trained alphanumeric model embedded, and plugs into
 this app three ways:
 
 - **UI:** the **Read Handwritten Log** page uploads a scan, transcribes it, and

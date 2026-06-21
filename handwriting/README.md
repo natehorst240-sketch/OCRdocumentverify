@@ -55,25 +55,28 @@ go test ./...                  # XOR convergence, numeric-gradient check, etc.
 
 ## A trained model ships in the box
 
-The binary already embeds a trained **digit** model — `make build` gives you a
-recognizer that reads 0–9 out of the box at **~98% MNIST test accuracy** (int8,
-~100 KB embedded). That covers a lot of real logbook content: tail numbers,
-dates, hours, cycles, ATA codes. Reproduce or refresh it with:
+The binary embeds a trained **alphanumeric** model (EMNIST balanced, 47 classes:
+digits + upper/lowercase letters), so `make build` gives a recognizer that reads
+letters *and* numbers out of the box — **~81% test accuracy, ~82% measured
+through the real image pipeline** (int8, ~210 KB embedded). The model is trained
+with `-normalize` so its training framing matches what the recognizer sees on
+real scans (see below). Reproduce or refresh it with:
 
 ```bash
-make model-mnist   # downloads MNIST, trains, evaluates, quantizes, embeds
+make model-emnist  # downloads EMNIST, trains, evaluates, quantizes, embeds
 ```
 
-For **letters too** (full alphanumeric logbook text) train on EMNIST balanced
-(47 classes: digits + upper/lowercase letters) and embed that instead:
+For **numeric-only** forms (tail numbers, dates, hours, cycles, ATA codes) a
+digit-only model is far more accurate — **~98% on MNIST** — and you can swap it
+in as the embedded default:
 
 ```bash
-make model-emnist  # downloads EMNIST, trains a 47-class model, quantizes, embeds
+make model-mnist   # downloads MNIST, trains a 10-class model, quantizes, embeds
 ```
 
-EMNIST is harder than MNIST (47 visually-confusable classes), so expect lower
-per-character accuracy than the ~98% digit model — which is exactly why training
-on your own logs (`TRAINING.md`) matters for production use.
+EMNIST is harder than MNIST (47 visually-confusable classes — O/0, I/1/l, S/5),
+so per-character accuracy is lower than the digit model. That gap is exactly why
+training on your own logs (`TRAINING.md`) is the path to production accuracy.
 
 ## Get a training set
 
