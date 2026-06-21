@@ -335,6 +335,46 @@ def page_reconstruct() -> None:
     st.subheader(f"Detected boxes ({len(recon['boxes'])})")
     st.image(recon["annotated"], use_container_width=True)
 
+    # --- Field-box review: flag boxes the handwriting engine read with low
+    # confidence, and let a human correct them before they flow into mapping.
+    boxes = recon["boxes"]
+    has_conf = any(b.get("confidence") is not None for b in boxes)
+    if has_conf:
+        st.subheader("Field box readings — review uncertain ones")
+        threshold = st.slider(
+            "Review threshold", 0.0, 1.0, 0.6, 0.05, key="recon_thresh",
+            help="Boxes read below this confidence are flagged for you to "
+                 "verify before the form is mapped and exported.")
+        flagged = [b["id"] for b in boxes
+                   if b.get("confidence") is not None
+                   and b["confidence"] < threshold]
+        if flagged:
+            st.warning(
+                f"⚠️ {len(flagged)} field box(es) read below "
+                f"{threshold:.0%} — verify box(es) {flagged} below before "
+                "mapping. Edits here flow into the field mapping.")
+        else:
+            st.success("✅ All field boxes read above the review threshold.")
+
+        review_rows = [{
+            "id": b["id"],
+            "review": "⚠️" if b["id"] in flagged else "",
+            "text": b.get("text", ""),
+            "confidence": (round(b["confidence"], 2)
+                           if b.get("confidence") is not None else None),
+        } for b in boxes]
+        edited_boxes = st.data_editor(
+            review_rows, use_container_width=True, num_rows="fixed",
+            hide_index=True, disabled=["id", "review", "confidence"],
+            key="box_review_editor")
+        # Write any corrected text back so mapping uses the reviewed values.
+        corrected = {r["id"]: r.get("text", "") for r in list(edited_boxes)}
+        for b in boxes:
+            if b["id"] in corrected:
+                b["text"] = corrected[b["id"]]
+        recon["boxes"] = boxes
+        st.session_state["recon"] = recon
+
     template = templates.load_template(chosen) if chosen != "Unknown" else None
     if template is None:
         st.warning(

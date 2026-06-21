@@ -148,6 +148,26 @@ def ocr_image(image, multiline: bool = True) -> str:
         return read_text(path, multiline=multiline)
 
 
+def ocr_image_with_confidence(image, multiline: bool = False) -> dict:
+    """Like ``ocr_image`` but also returns the recognizer's mean confidence,
+    so callers (e.g. field-box OCR) can flag uncertain reads for human review.
+
+    Returns ``{"text": str, "confidence": float}``. A field box is usually one
+    line, so ``multiline`` defaults to False.
+    """
+    import cv2
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "box.png")
+        if not cv2.imwrite(path, image):
+            raise HandwritingOCRError("could not write temp image for OCR")
+        res = read_file(path, multiline=multiline)
+        return {
+            "text": res.get("text", ""),
+            "confidence": res.get("mean_confidence", 0.0),
+        }
+
+
 def ocr_page(image_path: str) -> str:
     """Full handwritten-page pipeline mirroring ``ocr.ocr_page``."""
     return read_text(image_path, multiline=True)

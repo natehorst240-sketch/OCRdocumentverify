@@ -91,22 +91,46 @@ def detect_boxes(image_path: str | Path, min_area: int = 1500,
 
 
 def ocr_boxes(image_path: str | Path, boxes: list[dict]) -> list[dict]:
-    """OCR each detected box individually and attach its text (US 3.2)."""
+    """OCR each detected box individually and attach its text (US 3.2).
+
+    When the Go handwriting engine is active (``HANDWRITING_OCR=1``) each box is
+    read with a confidence score, attached as ``"confidence"`` so the UI can
+    flag uncertain boxes for human review. With PaddleOCR (no per-call
+    confidence) ``"confidence"`` is ``None``.
+    """
     import cv2
 
     image = cv2.imread(str(image_path))
     if image is None:
         raise FileNotFoundError(f"Could not read image: {image_path}")
 
+    # Decide the engine once: prefer the handwriting engine (with confidence)
+    # when it's enabled and runnable, else fall back to the default OCR path.
+    use_handwriting = False
+    try:
+        import handwriting_ocr
+
+        use_handwriting = handwriting_ocr.enabled() and \
+            handwriting_ocr.is_available()[0]
+    except Exception:
+        use_handwriting = False
+
     enriched = []
     for box in boxes:
         x, y, w, h = box["x"], box["y"], box["w"], box["h"]
         crop = image[y:y + h, x:x + w]
+        confidence = None
         try:
-            text = ocr.ocr_image(crop).strip()
+            if use_handwriting:
+                result = handwriting_ocr.ocr_image_with_confidence(
+                    crop, multiline=False)
+                text = (result.get("text") or "").strip()
+                confidence = result.get("confidence")
+            else:
+                text = ocr.ocr_image(crop).strip()
         except Exception:
             text = ""
-        enriched.append({**box, "text": text})
+        enriched.append({**box, "text": text, "confidence": confidence})
     return enriched
 
 
