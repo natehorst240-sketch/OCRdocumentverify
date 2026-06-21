@@ -5,6 +5,7 @@ package model
 import (
 	"encoding/gob"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/natehorst240-sketch/ocrdocumentverify/handwriting/nn"
@@ -12,11 +13,16 @@ import (
 
 // Model bundles the network with its label alphabet and the dataset it was
 // trained on, so a saved file is self-describing.
+//
+// When Quant is non-nil the float weights in Net are dropped on disk and the
+// network is reconstructed from the compact int8 payload at load time. This is
+// what lets a quantised model ship as a small blob embedded in the binary.
 type Model struct {
 	Net      *nn.Network
 	Labels   []string // Labels[class] -> printable glyph, e.g. "0".."9" or "A".."Z"
 	Dataset  string   // free-form provenance, e.g. "mnist" or "emnist-letters"
 	Accuracy float64  // held-out accuracy at save time (for reporting)
+	Quant    *Quantization
 }
 
 // DigitLabels returns "0".."9" for an MNIST model.
@@ -45,6 +51,17 @@ func (m *Model) Label(class int) string {
 	return m.Labels[class]
 }
 
+// Quantized reports whether the model is stored in int8 form.
+func (m *Model) Quantized() bool { return m.Quant != nil }
+
+// Write gob-encodes the model to w.
+func (m *Model) Write(w io.Writer) error {
+	if err := gob.NewEncoder(w).Encode(m); err != nil {
+		return fmt.Errorf("model: encode: %w", err)
+	}
+	return nil
+}
+
 // Save gob-encodes the model to path.
 func (m *Model) Save(path string) error {
 	f, err := os.Create(path)
@@ -52,10 +69,19 @@ func (m *Model) Save(path string) error {
 		return err
 	}
 	defer f.Close()
-	if err := gob.NewEncoder(f).Encode(m); err != nil {
-		return fmt.Errorf("model: encode: %w", err)
+	return m.Write(f)
+}
+
+// Read decodes a model from r, reconstructing float weights if it was quantised.
+func Read(r io.Reader) (*Model, error) {
+	var m Model
+	if err := gob.NewDecoder(r).Decode(&m); err != nil {
+		return nil, fmt.Errorf("model: decode: %w", err)
 	}
-	return nil
+	if m.Quant != nil {
+		m.Quant.materialize(m.Net)
+	}
+	return &m, nil
 }
 
 // Load reads a model previously written by Save.
@@ -65,9 +91,9 @@ func Load(path string) (*Model, error) {
 		return nil, err
 	}
 	defer f.Close()
-	var m Model
-	if err := gob.NewDecoder(f).Decode(&m); err != nil {
-		return nil, fmt.Errorf("model: decode %s: %w", path, err)
+	m, err := Read(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return &m, nil
+	return m, nil
 }

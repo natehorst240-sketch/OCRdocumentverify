@@ -31,8 +31,9 @@ data/       MNIST / EMNIST IDX dataset loader (handles .gz transparently)
 imageprep/  scan → MNIST-style 28×28 normalised vector (grayscale, crop,
             scale-to-20px, centre-of-mass centring)
 segment/    split a line image into per-character glyphs (projection profile)
-model/      gob save/load + label alphabet (digits "0-9" / letters "A-Z")
-cmd/handwriting/  CLI: train · eval · predict · read
+model/      gob save/load, int8 quantization, label alphabet (digits / letters)
+cmd/handwriting/  CLI: train · eval · quantize · predict · read (+ embedded model)
+Makefile    build · test · quantize-embed · cross-compile · USB packaging
 ```
 
 ## Build
@@ -109,6 +110,54 @@ in the distribution the model trained on:
 2. crop to the ink bounding box,
 3. scale the longest side to 20 px (aspect preserved),
 4. paste into 28×28, shifted so the **centre of mass** is centred.
+
+## Packaging as a standalone app (USB-stick, no install, no LLM)
+
+This tool has **no LLM and no Python dependency** — it never calls Qwen/Ollama
+or PaddleOCR. That makes it trivial to ship as a single self-contained native
+executable that someone can run from a USB stick with nothing to install.
+
+Three pieces make that real (all driven by the `Makefile`):
+
+**1. Shrink the model with int8 quantization.** `quantize` converts a trained
+float model to symmetric int8 — ~8× smaller on disk for a negligible accuracy
+hit (validated by a round-trip test):
+
+```bash
+./handwriting quantize -in digits.gob -out digits.q8.gob
+# quantised digits.gob (447.5 KB) -> digits.q8.gob (50.9 KB int8)
+```
+
+(For this small MLP int8 is a nice-to-have, not a necessity — the binary is a
+couple of MB either way. It becomes important if you grow to a large CRNN.)
+
+**2. Embed the model into the binary** so the executable *is* the app — no
+separate file to copy:
+
+```bash
+make embed-model MODEL=digits.q8.gob   # bakes it in, rebuilds
+./handwriting predict -image glyph.png # note: no -model flag needed
+```
+
+The model is embedded via `//go:embed` (see `cmd/handwriting/embed.go`). If no
+model is embedded the binary still builds and `-model` is simply required.
+
+**3. Cross-compile to every OS from one machine.** CGO is disabled, so the
+binaries are fully static — no DLLs, no libc version surprises:
+
+```bash
+make dist   # -> dist/handwriting-<ver>-windows-amd64.exe, darwin-arm64, linux-amd64, ...
+make usb    # -> dist/usb/ : a ready-to-copy folder (Windows .exe + plain README.txt)
+```
+
+Copy `dist/usb/` to the stick. The recipient double-clicks / runs
+`handwriting.exe read -image scan.png` — no installer, no admin rights, nothing
+left behind on uninstall (`USB_README.txt` is the end-user instructions).
+
+> Scope note: this packages the **handwriting recognizer**. The full aviation
+> app (compliance, Veryon import, etc.) is the Python side; dropping *its* LLM
+> dependency is a separate effort already partly covered by the root project's
+> `build_portable.bat` lite bundle and `DISABLE_LLM=1` mode.
 
 ## Scope and roadmap
 

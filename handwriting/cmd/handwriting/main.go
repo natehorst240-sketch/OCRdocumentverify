@@ -45,6 +45,8 @@ func main() {
 		err = cmdPredict(os.Args[2:])
 	case "read":
 		err = cmdRead(os.Args[2:])
+	case "quantize":
+		err = cmdQuantize(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -63,11 +65,13 @@ func usage() {
 	fmt.Fprint(os.Stderr, `handwriting — Go neural net for handwritten logbook recognition
 
 usage:
-  handwriting train   -images F -labels F -out model.gob [options]
+  handwriting train    -images F -labels F -out model.gob [options]
   handwriting eval     -model model.gob -images F -labels F
-  handwriting predict  -model model.gob -image glyph.png
-  handwriting read     -model model.gob -image line.png
+  handwriting quantize -in model.gob -out model.q8.gob
+  handwriting predict  [-model model.gob] -image glyph.png
+  handwriting read     [-model model.gob] -image line.png
 
+-model is optional when a default model is embedded in the binary.
 run "handwriting <subcommand> -h" for the full flag list.
 `)
 }
@@ -174,11 +178,59 @@ func cmdEval(args []string) error {
 	return nil
 }
 
+// --- quantize ---
+
+func cmdQuantize(args []string) error {
+	fs := flag.NewFlagSet("quantize", flag.ExitOnError)
+	in := fs.String("in", "", "input float model")
+	out := fs.String("out", "", "output int8 model")
+	fs.Parse(args)
+
+	if *in == "" || *out == "" {
+		return fmt.Errorf("quantize: -in and -out are required")
+	}
+	m, err := model.Load(*in)
+	if err != nil {
+		return err
+	}
+	if m.Quantized() {
+		return fmt.Errorf("quantize: %s is already quantised", *in)
+	}
+	m.Quantize()
+	if err := m.Save(*out); err != nil {
+		return err
+	}
+	inSize, _ := fileSize(*in)
+	outSize, _ := fileSize(*out)
+	fmt.Printf("quantised %s (%s) -> %s (%s int8)\n",
+		*in, humanBytes(inSize), *out, humanBytes(outSize))
+	return nil
+}
+
+func fileSize(path string) (int64, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return fi.Size(), nil
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 // --- predict ---
 
 func cmdPredict(args []string) error {
 	fs := flag.NewFlagSet("predict", flag.ExitOnError)
-	modelPath := fs.String("model", "model.gob", "model path")
+	modelPath := fs.String("model", "", "model path (optional if a model is embedded)")
 	imgPath := fs.String("image", "", "glyph image (PNG/JPEG)")
 	topK := fs.Int("topk", 3, "how many ranked guesses to show")
 	fs.Parse(args)
@@ -186,7 +238,7 @@ func cmdPredict(args []string) error {
 	if *imgPath == "" {
 		return fmt.Errorf("predict: -image is required")
 	}
-	m, err := model.Load(*modelPath)
+	m, err := resolveModel(*modelPath)
 	if err != nil {
 		return err
 	}
@@ -205,7 +257,7 @@ func cmdPredict(args []string) error {
 
 func cmdRead(args []string) error {
 	fs := flag.NewFlagSet("read", flag.ExitOnError)
-	modelPath := fs.String("model", "model.gob", "model path")
+	modelPath := fs.String("model", "", "model path (optional if a model is embedded)")
 	imgPath := fs.String("image", "", "line image (PNG/JPEG)")
 	minConf := fs.Float64("minconf", 0.0, "mark glyphs below this confidence with '·'")
 	verbose := fs.Bool("v", false, "print per-glyph confidence")
@@ -214,7 +266,7 @@ func cmdRead(args []string) error {
 	if *imgPath == "" {
 		return fmt.Errorf("read: -image is required")
 	}
-	m, err := model.Load(*modelPath)
+	m, err := resolveModel(*modelPath)
 	if err != nil {
 		return err
 	}
