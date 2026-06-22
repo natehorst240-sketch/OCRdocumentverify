@@ -5,6 +5,7 @@ Sprint 2: ingestion + OCR for scanned records, AD/ASB/ICA requirement PDFs,
           and Veryon Excel exports.
 """
 
+import hashlib
 import uuid
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import database
 import excel_export
 import field_mapper
 import form_detector
+import handwriting_ocr
 import inspection_parser
 import ocr
 import pdf_parser
@@ -333,6 +335,46 @@ def page_reconstruct() -> None:
     # --- US 3.2: annotated boxes --------------------------------------------
     st.subheader(f"Detected boxes ({len(recon['boxes'])})")
     st.image(recon["annotated"], use_container_width=True)
+
+    # --- Field-box review: flag boxes the handwriting engine read with low
+    # confidence, and let a human correct them before they flow into mapping.
+    boxes = recon["boxes"]
+    has_conf = any(b.get("confidence") is not None for b in boxes)
+    if has_conf:
+        st.subheader("Field box readings — review uncertain ones")
+        threshold = st.slider(
+            "Review threshold", 0.0, 1.0, 0.6, 0.05, key="recon_thresh",
+            help="Boxes read below this confidence are flagged for you to "
+                 "verify before the form is mapped and exported.")
+        flagged = [b["id"] for b in boxes
+                   if b.get("confidence") is not None
+                   and b["confidence"] < threshold]
+        if flagged:
+            st.warning(
+                f"⚠️ {len(flagged)} field box(es) read below "
+                f"{threshold:.0%} — verify box(es) {flagged} below before "
+                "mapping. Edits here flow into the field mapping.")
+        else:
+            st.success("✅ All field boxes read above the review threshold.")
+
+        review_rows = [{
+            "id": b["id"],
+            "review": "⚠️" if b["id"] in flagged else "",
+            "text": b.get("text", ""),
+            "confidence": (round(b["confidence"], 2)
+                           if b.get("confidence") is not None else None),
+        } for b in boxes]
+        edited_boxes = st.data_editor(
+            review_rows, use_container_width=True, num_rows="fixed",
+            hide_index=True, disabled=["id", "review", "confidence"],
+            key="box_review_editor")
+        # Write any corrected text back so mapping uses the reviewed values.
+        corrected = {r["id"]: r.get("text", "") for r in list(edited_boxes)}
+        for b in boxes:
+            if b["id"] in corrected:
+                b["text"] = corrected[b["id"]]
+        recon["boxes"] = boxes
+        st.session_state["recon"] = recon
 
     template = templates.load_template(chosen) if chosen != "Unknown" else None
     if template is None:
@@ -725,9 +767,170 @@ def page_aircraft_profile() -> None:
             "analysis, so you only chase inspections relevant to this tail.")
 
 
+def _confidence_overlay(image_path: Path, result: dict, threshold: float):
+    """Draw per-glyph boxes over the scan, highlighting what needs review.
+
+    Confident glyphs get a thin green→red box; glyphs below ``threshold`` get a
+    bold red box and a '?' so a reviewer's eye goes straight to them. Returns a
+    PIL image, or None if Pillow isn't available.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return None
+
+    img = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    bounds = result.get("line_bounds") or []
+    for li, line in enumerate(result.get("glyphs") or []):
+        y0, y1 = (bounds[li] if li < len(bounds) else (0, img.height - 1))
+        for g in line:
+            conf = float(g.get("confidence", 0.0))
+            x0, x1 = g.get("x0", 0), g.get("x1", 0)
+            if conf < threshold:
+                draw.rectangle([x0, y0, x1, y1], outline=(255, 0, 0), width=4)
+                draw.text((x0, max(0, y0 - 10)), "?", fill=(255, 0, 0))
+            else:
+                colour = (int(255 * (1 - conf)), int(255 * conf), 0)
+                draw.rectangle([x0, y0, x1, y1], outline=colour, width=2)
+    return img
+
+
+def _flag_uncertain(result: dict, threshold: float) -> list[dict]:
+    """Return the glyphs the recognizer read below ``threshold`` — the items a
+    human needs to decipher."""
+    flagged = []
+    for li, line in enumerate(result.get("glyphs") or []):
+        for pos, g in enumerate(line):
+            if float(g.get("confidence", 0.0)) < threshold:
+                flagged.append({
+                    "line": li + 1,
+                    "position": pos + 1,
+                    "best guess": g.get("char", "?"),
+                    "confidence": round(float(g.get("confidence", 0.0)), 3),
+                })
+    return flagged
+
+
+def page_read_handwriting() -> None:
+    """Read a handwritten logbook scan, flagging anything the model can't read
+    confidently for human review and correction.
+
+    Dedicated handwriting engine for the one task PaddleOCR (tuned for printed
+    text) handles poorly. Runs fully locally — no LLM, no Python ML stack — via
+    the embedded-model Go binary. The point is not perfection: uncertain
+    characters are surfaced so a person decides them before the text is trusted.
+    """
+    st.header("📝 Read Handwritten Log")
+
+    ok, message = handwriting_ocr.is_available()
+    if not ok:
+        st.warning(message)
+        st.markdown(
+            "**To enable:** build the recognizer and turn it on:\n"
+            "```bash\n"
+            "cd handwriting && make build   # alphanumeric model is embedded\n"
+            "export HANDWRITING_OCR=1\n"
+            "```\n"
+            "Set `HANDWRITING_BIN` if the binary lives elsewhere."
+        )
+        return
+    st.success(message)
+
+    c1, c2 = st.columns(2)
+    multiline = c1.checkbox(
+        "Multi-line page", value=True,
+        help="On for a whole logbook page; off for a single line / field box.")
+    threshold = c2.slider(
+        "Review threshold", 0.0, 1.0, 0.6, 0.05,
+        help="Characters the model reads below this confidence are flagged for "
+             "you to decide. Raise it to be more cautious.")
+
+    # Only PNG/JPEG — the Go recognizer decodes exactly those (no tiff/bmp).
+    uploaded = st.file_uploader(
+        "Upload a handwritten scan", type=["png", "jpg", "jpeg"])
+    if not uploaded:
+        return
+
+    path = save_upload(uploaded, subdir="handwriting")
+    # Tie widget state to this specific image so a later upload doesn't inherit
+    # the previous scan's edited text.
+    file_key = hashlib.md5(path.read_bytes()).hexdigest()[:12]
+    with st.spinner("Recognizing…"):
+        try:
+            # min_conf marks flagged chars with '·' in the read-only text view.
+            result = handwriting_ocr.read_file(
+                str(path), multiline=multiline, min_conf=threshold)
+        except handwriting_ocr.HandwritingOCRError as exc:
+            st.error(f"Recognition failed: {exc}")
+            return
+
+    flagged = _flag_uncertain(result, threshold)
+    mean = result.get("mean_confidence", 0.0)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Mean confidence", f"{mean:.0%}")
+    m2.metric("Lines read", str(len(result.get("lines") or [])))
+    m3.metric("Need review", str(len(flagged)))
+
+    if flagged:
+        st.warning(
+            f"⚠️ {len(flagged)} character(s) couldn't be read confidently. "
+            "They're marked with `·` below and boxed in red on the image — "
+            "please correct them before accepting.")
+    else:
+        st.success("✅ Every character was read above the review threshold.")
+
+    # Read-only view with flagged characters shown as '·'.
+    st.subheader("Recognized (· = needs review)")
+    st.code(result.get("text", ""), language=None)
+
+    overlay = _confidence_overlay(path, result, threshold)
+    if overlay is not None:
+        st.subheader("Where to look")
+        st.caption("Red box + ? = needs review · green→red = confidence")
+        st.image(overlay, use_column_width=True)
+
+    if flagged:
+        st.subheader("Items to decipher")
+        st.dataframe(flagged, use_container_width=True, hide_index=True)
+
+    # Human correction: pre-fill with best-guess text (not the '·' version) so
+    # the reviewer only has to fix the flagged spots, then accept.
+    st.subheader("Correct & accept")
+    corrected = st.text_area(
+        "Edit the transcription, fixing any flagged characters:",
+        value=result.get("text", ""), height=160,
+        key=f"hw_corrected_{file_key}")
+
+    a1, a2 = st.columns(2)
+    if a1.button("✅ Accept transcription", type="primary"):
+        out_path = OUTPUT_DIR / "handwriting" / (Path(uploaded.name).stem + ".txt")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(corrected, encoding="utf-8")
+        st.success(f"Saved reviewed transcription to `{out_path}`.")
+        st.download_button("Download .txt", corrected,
+                           file_name=out_path.name, mime="text/plain")
+
+    # Capture the uncertain glyphs so corrections become training data.
+    if flagged and a2.button("📁 Save flagged glyphs for retraining"):
+        review_dir = UPLOADS_DIR / "handwriting_review" / Path(uploaded.name).stem
+        try:
+            n = handwriting_ocr.export_uncertain_glyphs(
+                str(path), str(review_dir), max_conf=threshold,
+                multiline=multiline)
+            st.success(
+                f"Wrote {n} uncertain glyph image(s) to `{review_dir}`. Sort "
+                "them into per-character folders and run `handwriting train "
+                "-dir …` to teach the model your hand (see "
+                "`handwriting/TRAINING.md`).")
+        except handwriting_ocr.HandwritingOCRError as exc:
+            st.error(f"Could not export glyphs: {exc}")
+
+
 PAGES = {
     "Dashboard": page_dashboard,
     "Aircraft Profile": page_aircraft_profile,
+    "Read Handwritten Log": page_read_handwriting,
     "Upload Records": page_upload_records,
     "Upload Requirements": page_upload_requirements,
     "Upload Inspections": page_upload_inspections,

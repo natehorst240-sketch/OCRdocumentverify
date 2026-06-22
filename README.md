@@ -75,6 +75,26 @@ click-to-place component.
   no-LLM N100). Gap Analysis shows the Applies/Review/N-A counts and hides
   not-applicable items by default.
 
+### Handwriting recognition (Go neural network)
+
+`handwriting/` is a self-contained, pure-Go neural network (standard library
+only) that reads handwritten logbook scans — the one task PaddleOCR, tuned for
+printed text, handles poorly. It runs fully locally (no LLM, no Python ML stack)
+as a single static binary with a trained alphanumeric model embedded, and plugs into
+this app three ways:
+
+- **UI:** the **Read Handwritten Log** page uploads a scan, transcribes it, and
+  shows a per-character confidence overlay (green = confident, red = shaky).
+- **Pipeline:** set `HANDWRITING_OCR=1` and `ocr.ocr_image` routes handwriting
+  through the Go engine (via `handwriting_ocr.py`), falling back to PaddleOCR on
+  any error.
+- **Your own data:** `export-glyphs` + `train -dir` (and `Dockerfile.train`) let
+  you train the model on your real logs before publishing — see
+  [`handwriting/TRAINING.md`](handwriting/TRAINING.md).
+
+See [`handwriting/README.md`](handwriting/README.md) for build, training, and
+packaging (int8 quantization, embedded model, cross-compile, USB).
+
 ### Architecture note: how much actually needs the LLM?
 
 Most of the pipeline is a deterministic Python engine — OCR (PaddleOCR), PDF
@@ -179,7 +199,18 @@ and point `OLLAMA_HOST` at the desktop instead.)
 - **Auth** — Streamlit has no built-in login; keep it on a trusted LAN or front
   it with a reverse proxy / Cloudflare Tunnel for HTTPS + access control.
 
-## Distribute to someone without Docker (portable Windows bundle)
+## Distribute to someone without Docker
+
+Two ways to hand the whole app to a Windows user, both bundling a private Python
+runtime + the Go handwriting engine so there's nothing for them to install:
+
+- **A real installer (`setup.exe`)** — Start-Menu shortcut, optional desktop
+  icon, uninstaller. Best for a non-technical recipient. Build it with
+  `build_installer.bat`; see [`WINDOWS_INSTALLER.md`](WINDOWS_INSTALLER.md).
+- **A portable folder/zip** — no install at all; runs from a folder or USB
+  stick. Best for locked-down machines. Covered just below.
+
+### Portable Windows bundle
 
 For a recipient who can't install Docker or anything else (locked-down machine,
 no admin rights), build a **self-contained portable folder** — a private Python

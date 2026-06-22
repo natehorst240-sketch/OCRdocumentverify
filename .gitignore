@@ -6,6 +6,12 @@ __pycache__/
 venv/
 env/
 
+# Windows installer / portable build artifacts (built on the build machine)
+/runtime/
+/dist_installer/
+/handwriting.exe
+*.iss~
+
 # App data
 records.db
 records.db-journal
@@ -17,10 +23,25 @@ output/*
 !output/.gitkeep
 
 # Real records / runtime state (Docker bind-mounts and backups) — NEVER commit
+# NOTE: anchored to repo root so it does not swallow the Go handwriting/data/ package
 .env
-data/
+/data/
 backups/
 .session_lock.json
+
+# Go (handwriting neural net module)
+# built CLI binary
+handwriting/handwriting
+# cross-compiled distributables + training scratch
+handwriting/dist/
+handwriting/.data/
+# trained model files
+*.gob
+# ...but DO ship the small int8 model embedded in the binary (works out of the box)
+!handwriting/cmd/handwriting/assets/default.gob
+# downloaded MNIST/EMNIST datasets
+*-idx*-ubyte*
+*.idx
 
 # OS / editor
 .DS_Store
