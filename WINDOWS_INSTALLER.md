@@ -12,8 +12,11 @@ else to install.
   Add/Remove Programs uninstaller).
 - Installs per-user into a writable folder, so the app can store its database,
   uploads, and output beside itself without admin rights.
-- Launching it opens the app in their browser at `http://localhost:8501`,
-  running locally in no-LLM mode with the Go handwriting engine enabled.
+- Launching it opens the app in **its own window** (Edge/Chrome "app mode" —
+  no tabs or address bar), served locally at `http://localhost:8501` in no-LLM
+  mode with the Go handwriting engine enabled. Closing the app window quits.
+  (A small console window runs the server in the background; you can minimize
+  it — it closes automatically when you quit the app.)
 
 ## Easiest: build it in the cloud (no Windows machine needed)
 

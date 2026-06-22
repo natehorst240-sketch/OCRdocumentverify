@@ -229,9 +229,10 @@ reliable; run `build_portable.bat full` for the heavy OCR build). Then:
 1. Delete `.venv\` and `__pycache__\` to keep the size down.
 2. **Zip the whole folder** and send it (e.g. via file share).
 
-**The recipient** unzips it anywhere and **double-clicks `run.bat`** — a browser
-opens at `http://localhost:8501`. No Docker, no installer, no admin rights. It
-runs in no-LLM mode, bound to localhost only (nothing exposed on their network).
+**The recipient** unzips it anywhere and **double-clicks `run.bat`** — the app
+opens in its own window (Edge/Chrome app mode), served locally at
+`http://localhost:8501`. No Docker, no installer, no admin rights. It runs in
+no-LLM mode, bound to localhost only (nothing exposed on their network).
 
 What works in the lite bundle: inspections, requirements, Veryon import, gap
 analysis, applicability, templates, filled-PDF output. What needs the full build
